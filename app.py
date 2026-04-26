@@ -1,3 +1,7 @@
+# app.py
+# Buy Side Terminal MASTER
+# Login + Scanner Inteligente + Ativo Específico
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -11,10 +15,12 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 # =====================================================
 
 st.set_page_config(
-    page_title="Buy Side Terminal PRO",
+    page_title="Buy Side Terminal MASTER",
     page_icon="🏹",
     layout="wide"
 )
+
+SENHA_CORRETA = "LUCRO5"
 
 # =====================================================
 # ESTILO
@@ -22,31 +28,99 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.main {background-color:#0e1117;}
+.main {
+    background-color:#0e1117;
+}
+.stTextInput > div > div > input {
+    background:#161b22;
+    color:white;
+}
+.stButton > button {
+    width:100%;
+    border-radius:8px;
+    height:45px;
+}
 .stMetric {
     background:#161b22;
     padding:14px;
     border-radius:10px;
     border:1px solid #30363d;
 }
-div[data-testid="stDataFrame"] {
-    border:1px solid #30363d;
-    border-radius:10px;
-}
 </style>
 """, unsafe_allow_html=True)
 
 # =====================================================
-# UNIVERSO TOP 30
+# LOGIN
+# =====================================================
+
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if not st.session_state.logado:
+
+    st.title("🏹 Buy Side Terminal MASTER")
+    st.subheader("Área Restrita")
+
+    senha = st.text_input(
+        "Digite sua senha:",
+        type="password"
+    )
+
+    if st.button("🔐 ENTRAR"):
+
+        if senha == SENHA_CORRETA:
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Senha inválida.")
+
+    st.stop()
+
+# =====================================================
+# LISTA DE ATIVOS
 # =====================================================
 
 ATIVOS = [
-    "PETR4","VALE3","BBAS3","ITUB4","BBDC4","ABEV3",
-    "WEGE3","RENT3","SUZB3","PRIO3","RADL3","LREN3",
-    "JBSS3","GGBR4","CSNA3","CMIG4","ELET3","TAEE11",
-    "B3SA3","EGIE3","VIVT3","MULT3","TIMS3","RAIL3",
-    "BOVA11","SMAL11","IVVB11","DIVO11","XFIX11","HASH11"
+"RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
+"B3SA3","BBAS3","BBDC3","BBDC4","BBSE3","BEEF3","BPAC11",
+"BRAP4","BRFS3","BRKM5","CCRO3","CMIG4","CMIN3","COGN3",
+"CPFE3","CPLE6","CRFB3","CSAN3","CSNA3","CYRE3","DXCO3",
+"EGIE3","ELET3","ELET6","EMBR3","ENEV3","ENGI11","EQTL3",
+"EZTC3","FLRY3","GGBR4","GOAU4","GOLL4","HAPV3","HYPE3",
+"ITSA4","ITUB4","JBSS3","KLBN11","LREN3","LWSA3","MGLU3",
+"MRFG3","MRVE3","MULT3","NTCO3","PETR3","PETR4","PRIO3",
+"RADL3","RAIL3","RAIZ4","RENT3","RECV3","SANB11","SBSP3",
+"SLCE3","SMTO3","SUZB3","TAEE11","TIMS3","TTEN3","TOTS3",
+"TRPL4","UGPA3","USIM5","VALE3","VIVT3","VIVA3","WEGE3",
+"YDUQ3","AURE3","BHIA3","CASH3","CVCB3","DIRR3","ENAT3",
+"GMAT3","IFCM3","INTB3","JHSF3","KEPL3","MOVI3","ORVR3",
+"PETZ3","PLAS3","POMO4","POSI3","RANI3","RAPT4","STBP3",
+"TEND3","TUPY3","BRSR6","CXSE3",
+
+"AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34",
+"NFLX34","NVDC34","MELI34","BABA34","DISB34","PYPL34",
+"JNJB34","PGCO34","KOCH34","VISA34","WMTB34","NIKE34",
+"ADBE34","AVGO34","CSCO34","COST34","CVSH34","GECO34",
+"GSGI34","HDCO34","INTC34","JPMC34","MAEL34","MCDP34",
+"MDLZ34","MRCK34","ORCL34","PEP334","PFIZ34","PMIC34",
+"QCOM34","SBUX34","TGTB34","TMOS34","TXN34","UNHH34",
+"UPSB34","VZUA34","ABTT34","AMGN34","AXPB34","BAOO34",
+"C2OL34","HONB34","BICE34","BERK34","GOGL35",
+
+"BOVA11","IVVB11","SMAL11","HASH11","GOLD11","DIVO11",
+"NDIV11","SPUB11",
+
+"GARE11","HGLG11","XPLG11","VILG11","BRCO11","BTLG11",
+"XPML11","VISC11","HSML11","MALL11","KNRI11","JSRE11",
+"PVBI11","HGRE11","MXRF11","KNCR11","KNIP11","CPTS11",
+"IRDM11","TGAR11","TRXF11","HGRU11","ALZR11","XPCA11",
+"VGIA11","RBRR11","KNSC11","CACR11","HABT11","DEVA11",
+"HGCR11","MCCI11","RECR11","VRTA11","BCFF11","HFOF11",
+"XPSF11","RBRP11","RBRF11","URIT11","RZTR11","RURA11",
+"VGIR11","CVBI11"
 ]
+
+ATIVOS = list(dict.fromkeys(ATIVOS))
 
 # =====================================================
 # FUNÇÕES
@@ -65,34 +139,37 @@ def wilson_score(pos, total):
 
 @st.cache_data(ttl=600)
 def baixar_dados(ticker):
-    tk = ticker + ".SA"
 
-    df = yf.download(
-        tk,
-        period="180d",
-        interval="1d",
-        progress=False,
-        auto_adjust=True
-    )
+    try:
+        df = yf.download(
+            ticker + ".SA",
+            period="180d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True
+        )
 
-    if df.empty:
+        if df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        cols = ['Open','High','Low','Close','Volume']
+        df = df[cols]
+
+        for c in cols:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        df = df.ffill().dropna()
+
+        if len(df) < 80:
+            return None
+
+        return df
+
+    except:
         return None
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    cols = ['Open','High','Low','Close','Volume']
-    df = df[cols]
-
-    for c in cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    df = df.ffill().dropna()
-
-    if len(df) < 80:
-        return None
-
-    return df
 
 def ema(series, n):
     return series.ewm(span=n, adjust=False).mean()
@@ -108,36 +185,6 @@ def calc_obv(close, volume):
             obv[i] = obv[i-1]
     return obv
 
-def calc_dmi(df, n=14):
-    high = df['High']
-    low = df['Low']
-    close = df['Close']
-
-    plus_dm = high.diff()
-    minus_dm = low.diff() * -1
-
-    plus_dm = np.where(
-        (plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0
-    )
-    minus_dm = np.where(
-        (minus_dm > plus_dm) & (minus_dm > 0), minus_dm, 0
-    )
-
-    tr1 = high - low
-    tr2 = abs(high - close.shift())
-    tr3 = abs(low - close.shift())
-
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(n).mean()
-
-    plus_di = 100 * (pd.Series(plus_dm).rolling(n).mean() / atr)
-    minus_di = 100 * (pd.Series(minus_dm).rolling(n).mean() / atr)
-
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    adx = dx.rolling(n).mean()
-
-    return plus_di.values, minus_di.values, adx.values
-
 def sentimento_score(ticker):
     try:
         obj = yf.Ticker(ticker + ".SA")
@@ -146,8 +193,7 @@ def sentimento_score(ticker):
         analyzer = SentimentIntensityAnalyzer()
 
         titulos = []
-
-        for n in noticias[:10]:
+        for n in noticias[:8]:
             t = n.get("title")
             if t:
                 titulos.append(t)
@@ -156,7 +202,6 @@ def sentimento_score(ticker):
             return 0
 
         vals = []
-
         for t in titulos:
             vals.append(
                 analyzer.polarity_scores(t)["compound"]
@@ -168,57 +213,48 @@ def sentimento_score(ticker):
         return 0
 
 def analisar_ativo(ticker):
+
     df = baixar_dados(ticker)
 
     if df is None:
         return None
 
-    close = df['Close'].values
-    volume = df['Volume'].values
+    close = df["Close"].values
+    volume = df["Volume"].values
     preco = float(close[-1])
 
-    ema21 = ema(df['Close'], 21).values
-    ema72 = ema(df['Close'], 72).values
+    ema21 = ema(df["Close"], 21).values
+    ema72 = ema(df["Close"], 72).values
 
     obv = calc_obv(close, volume)
 
-    plus_di, minus_di, adx = calc_dmi(df)
-
     sent = sentimento_score(ticker)
-
-    # ===================================
-    # SCORE CONSERVADOR
-    # ===================================
 
     score = 0
 
     c1 = preco > ema21[-1] > ema72[-1]
     if c1:
-        score += 30
+        score += 35
 
-    c2 = adx[-1] > 20 if not np.isnan(adx[-1]) else False
+    c2 = obv[-1] > np.mean(obv[-10:])
     if c2:
-        score += 18
+        score += 25
 
-    c3 = plus_di[-1] > minus_di[-1] if not np.isnan(plus_di[-1]) else False
+    c3 = close[-1] > close[-3]
     if c3:
-        score += 15
+        score += 20
 
-    c4 = obv[-1] > np.mean(obv[-10:])
+    c4 = sent > 0
     if c4:
-        score += 15
+        score += 10
 
-    c5 = sent > 0
+    c5 = close[-1] > close[-5]
     if c5:
-        score += 7
+        score += 10
 
-    c6 = close[-1] > close[-3]
-    if c6:
-        score += 15
+    positivos = sum([c1,c2,c3,c4,c5])
 
-    positivos = sum([c1,c2,c3,c4,c5,c6])
-
-    wil = wilson_score(positivos, 6) * 100
+    wil = wilson_score(positivos, 5) * 100
 
     prob = (score * 0.65) + (wil * 0.35)
 
@@ -252,10 +288,10 @@ def analisar_ativo(ticker):
 
 with st.sidebar:
 
-    st.title("🏹 Buy Side PRO")
+    st.title("🏹 Menu")
 
     modo = st.radio(
-        "Modo:",
+        "Escolha:",
         ["Scanner Inteligente", "Ativo Específico"]
     )
 
@@ -265,10 +301,9 @@ with st.sidebar:
 
 if modo == "Scanner Inteligente":
 
-    st.title("🏹 Scanner Inteligente Top 30")
-    st.caption("Mostra apenas ativos com maior chance de êxito.")
+    st.title("🏹 Scanner 178+ Ativos")
 
-    if st.button("🚀 ESCANEAR MERCADO", use_container_width=True):
+    if st.button("🚀 ESCANEAR MERCADO"):
 
         resultados = []
 
@@ -279,34 +314,27 @@ if modo == "Scanner Inteligente":
             r = analisar_ativo(ativo)
 
             if r:
-                # MOSTRAR SOMENTE APROVADOS
                 if r["Probabilidade %"] >= 70:
                     resultados.append(r)
 
             barra.progress((i+1)/len(ATIVOS))
 
         if len(resultados) == 0:
-            st.warning("Nenhuma oportunidade forte encontrada hoje.")
+            st.warning("Nenhuma oportunidade encontrada.")
 
         else:
+
             tabela = pd.DataFrame(resultados)
 
             tabela = tabela[
-                [
-                    "Ativo",
-                    "Preço",
-                    "Probabilidade %",
-                    "Stop",
-                    "Gain",
-                    "Status"
-                ]
+                ["Ativo","Preço","Probabilidade %","Stop","Gain","Status"]
             ].sort_values(
                 by="Probabilidade %",
                 ascending=False
             )
 
             st.success(
-                f"{len(tabela)} oportunidades encontradas."
+                f"{len(tabela)} oportunidades aprovadas."
             )
 
             st.dataframe(
@@ -324,16 +352,16 @@ else:
     st.title("🏹 Análise Individual")
 
     ativo = st.text_input(
-        "Digite qualquer ticker da B3:",
+        "Digite qualquer ticker:",
         "PETR4"
     ).upper().replace(".SA","")
 
-    if st.button("🔎 ANALISAR", use_container_width=True):
+    if st.button("🔎 ANALISAR"):
 
         r = analisar_ativo(ativo)
 
         if r is None:
-            st.error("Ativo inválido ou sem dados.")
+            st.error("Ativo inválido.")
 
         else:
 
@@ -346,13 +374,13 @@ else:
 
             st.subheader(r["Status"])
 
-            plot = pd.DataFrame({
+            graf = pd.DataFrame({
                 "Preço": r["df"]["Close"],
                 "EMA21": r["ema21"],
                 "EMA72": r["ema72"]
             }, index=r["df"].index)
 
-            st.line_chart(plot)
+            st.line_chart(graf)
 
 # =====================================================
 # RODAPÉ
@@ -360,5 +388,5 @@ else:
 
 st.markdown("---")
 st.caption(
-    f"Atualizado em {time.strftime('%d/%m/%Y %H:%M:%S')} | Perfil Segurança"
+    f"Buy Side MASTER | {time.strftime('%d/%m/%Y %H:%M:%S')}"
 )
