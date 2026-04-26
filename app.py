@@ -1,113 +1,164 @@
-# =====================================================
-# BUY SIDE TERMINAL V4 ELITE + SIMULADOR
-# =====================================================
+# app.py
+# BUY SIDE TERMINAL V4 ELITE - EDGE ENGINE + SIMULADOR
+# COMPLETO E CORRIGIDO
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import math
+import time
 
-st.set_page_config(page_title="V4 ELITE SIMULATOR", layout="wide")
+# =====================================================
+# CONFIG
+# =====================================================
+
+st.set_page_config(
+    page_title="BUY SIDE TERMINAL V4 ELITE",
+    page_icon="🏹",
+    layout="wide"
+)
 
 SENHA = "LUCRO5"
+
+# =====================================================
+# CSS
+# =====================================================
+
+st.markdown("""
+<style>
+.main {background:#0e1117;}
+.stTextInput input {
+    background:#161b22 !important;
+    color:white !important;
+}
+.stButton button {
+    width:100%;
+    height:44px;
+    border-radius:10px;
+}
+.stMetric {
+    background:#161b22;
+    padding:14px;
+    border-radius:10px;
+    border:1px solid #30363d;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =====================================================
 # LOGIN
 # =====================================================
 
-if "ok" not in st.session_state:
-    st.session_state.ok = False
+if "logado" not in st.session_state:
+    st.session_state.logado = False
 
-if not st.session_state.ok:
-    senha = st.text_input("Senha", type="password")
+if not st.session_state.logado:
 
-    if st.button("Entrar"):
+    st.title("🏹 BUY SIDE TERMINAL V4 ELITE")
+
+    senha = st.text_input("Senha:", type="password")
+
+    if st.button("ENTRAR"):
         if senha == SENHA:
-            st.session_state.ok = True
+            st.session_state.logado = True
             st.rerun()
         else:
-            st.error("Senha inválida")
+            st.error("Senha incorreta.")
 
     st.stop()
 
 # =====================================================
-# ATIVOS (INSERIR SUA LISTA COMPLETA AQUI)
+# UNIVERSO (INSIRA SUA LISTA COMPLETA AQUI)
 # =====================================================
 
 ATIVOS = [
 "PETR4","VALE3","BBAS3","ITUB4","WEGE3","PRIO3","RENT3",
-"BOVA11","IVVB11"
+"BOVA11","IVVB11","SMAL11","GOLD11","DIVO11","NDIV11",
+"HGLG11","XPLG11","VISC11","MXRF11","KNRI11",
+"AAPL34","MSFT34","TSLA34","AMZO34","META34",
+"C2OL34"
 ]
 
 # =====================================================
 # FUNÇÕES
 # =====================================================
 
-def ema(s,n):
-    return s.ewm(span=n,adjust=False).mean()
+def ema(series, n):
+    return series.ewm(span=n, adjust=False).mean()
 
 
-def analisar(t):
+def analisar(ticker):
 
-    df = yf.download(t+".SA", period="250d", interval="1d", auto_adjust=True, progress=False)
+    df = yf.download(
+        ticker + ".SA",
+        period="260d",
+        interval="1d",
+        auto_adjust=True,
+        progress=False
+    )
 
-    if df.empty:
+    if df.empty or len(df) < 120:
         return None
 
-    c = df["Close"].values
-    h = df["High"].values
-    v = df["Volume"].values
+    close = df["Close"].values.astype(float)
+    volume = df["Volume"].values.astype(float)
 
-    price = c[-1]
+    preco = close[-1]
 
-    e21 = ema(df["Close"],21).values
-    e72 = ema(df["Close"],72).values
+    ema21 = ema(df["Close"], 21).values
+    ema72 = ema(df["Close"], 72).values
 
-    # =========================
+    # =====================================================
     # SCORE BASE
-    # =========================
+    # =====================================================
 
     score = 0
 
-    if price > e21[-1]:
+    if preco > ema21[-1]:
         score += 15
 
-    if e21[-1] > e72[-1]:
+    if ema21[-1] > ema72[-1]:
         score += 15
 
-    ret5 = (price/c[-6]-1)*100
+    ret5 = (preco / close[-6] - 1) * 100
 
     if ret5 > 0:
+        score += min(ret5 * 2, 15)
+
+    vol_media = np.mean(volume[-20:])
+
+    if volume[-1] > vol_media:
         score += 10
 
-    vol_ok = v[-1] > np.mean(v[-20:])
-    if vol_ok:
-        score += 10
-
-    # =========================
-    # WILSON
-    # =========================
+    # =====================================================
+    # WILSON SCORE
+    # =====================================================
 
     checks = [
-        price > e21[-1],
-        e21[-1] > e72[-1],
+        preco > ema21[-1],
+        ema21[-1] > ema72[-1],
         ret5 > 0,
-        vol_ok
+        volume[-1] > vol_media
     ]
 
     pos = sum(checks)
 
-    wil = (pos/len(checks))*100
+    wil = (pos / len(checks)) * 100
 
     prob = wil
 
-    # =========================
-    # VOLATILIDADE REGIME
-    # =========================
+    # =====================================================
+    # REGIME DE VOLATILIDADE (CORRIGIDO)
+    # =====================================================
 
-    ret = np.diff(c[-20:])/c[-20:-1]
-    vol = np.std(ret)*100
+    window = close[-21:]
+
+    if len(window) < 21:
+        return None
+
+    ret = np.diff(window) / window[:-1]
+    vol = np.std(ret) * 100
 
     if vol < 1.2:
         adj = 1.15
@@ -118,87 +169,93 @@ def analisar(t):
 
     prob_adj = prob * adj
 
-    # =========================
+    # =====================================================
     # RISCO / RETORNO
-    # =========================
+    # =====================================================
 
-    stop = price*0.965
-    atr = np.std(c[-14:])
+    stop = preco * 0.965
+    atr = np.std(close[-14:])
 
-    gain = atr*2.2*(prob_adj/100)
+    gain = atr * 2.2 * (prob_adj / 100)
 
-    rr = gain/(price-stop)
+    rr = gain / (preco - stop)
 
-    # =========================
+    # =====================================================
     # EDGE REAL
-    # =========================
+    # =====================================================
 
-    risk = price-stop
+    risco = preco - stop
 
-    edge = (prob_adj/100 * gain) - ((1-prob_adj/100)*risk)
+    edge = (prob_adj / 100 * gain) - ((1 - prob_adj / 100) * risco)
 
     return {
-        "Ativo": t,
-        "Preço": price,
-        "Prob": prob_adj,
-        "Gain": gain,
-        "RR": rr,
-        "EDGE": edge,
-        "Stop": stop
+        "Ativo": ticker,
+        "Preço": round(preco,2),
+        "Prob": round(prob_adj,2),
+        "Gain": round(gain,2),
+        "RR": round(rr,2),
+        "EDGE": round(edge,4),
+        "Stop": round(stop,2)
     }
 
 # =====================================================
 # SCANNER
 # =====================================================
 
-if st.button("ESCANEAR"):
+st.title("🏹 V4 ELITE EDGE SYSTEM")
 
-    res = []
+if st.button("ESCANEAR MERCADO"):
 
-    bar = st.progress(0)
+    resultados = []
 
-    for i,t in enumerate(ATIVOS):
+    barra = st.progress(0)
+
+    for i, t in enumerate(ATIVOS):
 
         r = analisar(t)
 
         if r:
-            res.append(r)
+            resultados.append(r)
 
-        bar.progress((i+1)/len(ATIVOS))
+        barra.progress((i+1)/len(ATIVOS))
 
-    df = pd.DataFrame(res)
+    if len(resultados) == 0:
+        st.warning("Nenhum ativo válido encontrado.")
+        st.stop()
 
-    df = df.sort_values("EDGE",ascending=False)
+    df = pd.DataFrame(resultados)
+
+    df = df.sort_values("EDGE", ascending=False)
 
     top8 = df.head(8)
 
-    st.subheader("TOP 8 TRADES")
+    st.subheader("🏆 TOP 8 TRADES (EDGE REAL)")
 
-    st.dataframe(top8)
+    st.dataframe(top8, use_container_width=True)
 
     # =====================================================
     # SIMULADOR MENSAL
     # =====================================================
 
-    ev_list = []
+    evs = []
 
-    for _,row in top8.iterrows():
+    for _, row in top8.iterrows():
 
-        prob = row["Prob"]/100
+        prob = row["Prob"] / 100
         gain = row["Gain"]
         stop = row["Stop"]
 
-        ev = (prob*gain) - ((1-prob)*(stop*0.035))
+        ev = (prob * gain) - ((1 - prob) * (stop * 0.035))
 
-        ev_list.append(ev)
+        evs.append(ev)
 
-    ev_total = np.sum(ev_list)
+    ev_total = np.sum(evs)
 
     st.subheader("📊 SIMULAÇÃO MENSAL (8 TRADES)")
 
-    st.write(f"Expectativa mensal: {ev_total*100:.2f}%")
+    st.write(f"Expectativa mensal estimada: {ev_total * 100:.2f}%")
 
-    if ev_total > 0.05:
-        st.success("Meta de +5%/mês estatisticamente viável")
+    if ev_total >= 0.05:
+        st.success("Sistema estatisticamente compatível com meta de +5% ao mês")
     else:
         st.warning("Meta de +5% ainda abaixo da expectativa atual")
