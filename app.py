@@ -3,14 +3,31 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import math
+import requests
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Wilson Buy-Side Score", layout="wide")
+# --- NOVIDADE: Configuração de Sessão para evitar bloqueios ---
+@st.cache_resource
+def get_session():
+    session = requests.Session()
+    # Simula um navegador real para o Yahoo não bloquear
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    })
+    return session
+
+# --- NOVIDADE: Cache de dados por 15 minutos ---
+@st.cache_data(ttl=900)
+def buscar_dados_ativo(ticker_b3):
+    session = get_session()
+    ticker_obj = yf.Ticker(ticker_b3, session=session)
+    # Tenta buscar o histórico
+    hist = ticker_obj.history(period="60d")
+    return ticker_obj, hist
 
 def wilson_score(positivos, total, confidence=0.95):
     if total == 0: return 0
-    z = 1.96  # Confiança de 95%
+    z = 1.96
     phat = positivos / total
     denominador = 1 + z**2/total
     numerador = phat + z**2/(2*total) - z * math.sqrt((phat*(1-phat) + z**2/(4*total))/total)
@@ -47,73 +64,73 @@ def calcular_sar_parabolico(df):
                     af = min(af + 0.02, 0.2)
     return sar
 
-# --- APP INTERFACE ---
+# --- INTERFACE ---
 st.title("🏹 Buy-Side Intelligence: Wilson Confidence")
-st.markdown("Análise estatística baseada em Sentimento, EMA21, OBV e SAR.")
 
 ticker = st.sidebar.text_input("Ticker B3", "PETR4").upper()
 if not ticker.endswith(".SA"): ticker += ".SA"
 
 if st.sidebar.button("EXECUTAR ANÁLISE PROFISSIONAL"):
-    with st.spinner("Processando dados e notícias..."):
-        acao = yf.Ticker(ticker)
-        hist = acao.history(period="60d")
-        
-        if hist.empty:
-            st.error("Ativo não encontrado.")
-        else:
-            # 1. Indicadores Técnicos
-            ema21 = hist['Close'].ewm(span=21, adjust=False).mean()
-            sar = calcular_sar_parabolico(hist)
+    try:
+        with st.spinner("Conectando ao Yahoo Finance..."):
+            # Chamada com Cache e Sessão
+            acao, hist = buscar_dados_ativo(ticker)
             
-            # OBV
-            obv = [0]
-            for i in range(1, len(hist)):
-                if hist['Close'].iloc[i] > hist['Close'].iloc[i-1]:
-                    obv.append(obv[-1] + hist['Volume'].iloc[i])
-                elif hist['Close'].iloc[i] < hist['Close'].iloc[i-1]:
-                    obv.append(obv[-1] - hist['Volume'].iloc[i])
-                else: obv.append(obv[-1])
-            hist['OBV'] = obv
+            if hist.empty:
+                st.error("Não recebemos dados. O Yahoo pode estar instável ou o Ticker está errado.")
+            else:
+                # Cálculos Técnicos
+                ema21 = hist['Close'].ewm(span=21, adjust=False).mean()
+                sar = calcular_sar_parabolico(hist)
+                
+                # OBV
+                obv = [0]
+                for i in range(1, len(hist)):
+                    if hist['Close'].iloc[i] > hist['Close'].iloc[i-1]:
+                        obv.append(obv[-1] + hist['Volume'].iloc[i])
+                    elif hist['Close'].iloc[i] < hist['Close'].iloc[i-1]:
+                        obv.append(obv[-1] - hist['Volume'].iloc[i])
+                    else: obv.append(obv[-1])
+                hist['OBV'] = obv
 
-            # 2. Sentimento
-            analyzer = SentimentIntensityAnalyzer()
-            analyzer.lexicon.update({'lucro': 4, 'alta': 2, 'dividendos': 3, 'ebitda': 2, 'recorde': 3})
-            news = acao.news
-            titulos = [n['title'] for n in news[:15]]
-            sent_scores = [analyzer.polarity_scores(t)['compound'] for t in titulos]
-            avg_sent = sum(sent_scores)/len(sent_scores) if sent_scores else 0
+                # Sentimento
+                analyzer = SentimentIntensityAnalyzer()
+                analyzer.lexicon.update({'lucro': 4, 'alta': 2, 'dividendos': 3, 'ebitda': 2, 'recorde': 3})
+                news = acao.news
+                titulos = [n['title'] for n in news[:15]]
+                sent_scores = [analyzer.polarity_scores(t)['compound'] for t in titulos]
+                avg_sent = sum(sent_scores)/len(sent_scores) if sent_scores else 0
 
-            # 3. Cálculo de Confluência (Wilson)
-            sinais = 0
-            total_testes = 4
-            
-            # Condições Buy-Side
-            cond_ema = hist['Close'].iloc[-1] > ema21.iloc[-1]
-            cond_obv = hist['OBV'].iloc[-1] > hist['OBV'].iloc[-5] # Subindo nos últimos 5 dias
-            cond_sent = avg_sent > 0.10
-            cond_sar = sar.iloc[-1] < hist['Close'].iloc[-1]
+                # Wilson Score
+                sinais = 0
+                cond_ema = hist['Close'].iloc[-1] > ema21.iloc[-1]
+                cond_obv = hist['OBV'].iloc[-1] > hist['OBV'].iloc[-5]
+                cond_sent = avg_sent > 0.10
+                cond_sar = sar.iloc[-1] < hist['Close'].iloc[-1]
 
-            if cond_ema: sinais += 1
-            if cond_obv: sinais += 1
-            if cond_sent: sinais += 1
-            if cond_sar: sinais += 1
+                if cond_ema: sinais += 1
+                if cond_obv: sinais += 1
+                if cond_sent: sinais += 1
+                if cond_sar: sinais += 1
 
-            prob_wilson = wilson_score(sinais, total_testes) * 100
+                prob_wilson = wilson_score(sinais, 4) * 100
 
-            # --- DISPLAY ---
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.metric("Confiança de Wilson", f"{prob_wilson:.1f}%")
-                if prob_wilson > 60: st.success("SINAL DE COMPRA FORTE")
-                elif prob_wilson > 30: st.warning("SINAL MODERADO / NEUTRO")
-                else: st.error("RISCO ALTO / VENDA")
-            
-            with c2:
-                st.write("**Checklist de Validação:**")
-                st.write(f"{'✅' if cond_ema else '❌'} Preço acima da EMA21 (Tendência)")
-                st.write(f"{'✅' if cond_obv else '❌'} OBV Acumulando (Volume)")
-                st.write(f"{'✅' if cond_sent else '❌'} Sentimento Positivo (Notícias)")
-                st.write(f"{'✅' if cond_sar else '❌'} SAR Parabólico (Suporte)")
+                # --- DISPLAY ---
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    st.metric("Confiança de Wilson", f"{prob_wilson:.1f}%")
+                    if prob_wilson > 60: st.success("SINAL DE COMPRA FORTE")
+                    elif prob_wilson > 30: st.warning("SINAL MODERADO")
+                    else: st.error("RISCO ALTO")
+                
+                with c2:
+                    st.write("**Checklist de Validação:**")
+                    st.write(f"{'✅' if cond_ema else '❌'} EMA21")
+                    st.write(f"{'✅' if cond_obv else '❌'} OBV")
+                    st.write(f"{'✅' if cond_sent else '❌'} Sentimento")
+                    st.write(f"{'✅' if cond_sar else '❌'} SAR")
 
-            st.line_chart(hist[['Close']])
+                st.line_chart(hist['Close'])
+
+    except Exception as e:
+        st.error(f"Erro de Conexão: O Yahoo Finance bloqueou a requisição. Tente novamente em alguns minutos. Detalhes: {e}")
