@@ -1,15 +1,13 @@
-# =====================================================
-# BUY SIDE TERMINAL - EXECUÇÃO AUTOMÁTICA FINAL
-# =====================================================
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import math
-import time
 
-st.set_page_config(page_title="EXECUÇÃO PRO DESK", layout="wide")
+# =====================================================
+# CONFIG
+# =====================================================
+
+st.set_page_config(page_title="PRO DESK STABLE", layout="wide")
 
 SENHA = "LUCRO5"
 
@@ -22,7 +20,7 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏦 EXECUÇÃO AUTOMÁTICA PRO DESK")
+    st.title("🏦 PRO DESK STABLE ENGINE")
 
     senha = st.text_input("Senha:", type="password")
 
@@ -30,16 +28,15 @@ if not st.session_state.logado:
         if senha == SENHA:
             st.session_state.logado = True
             st.rerun()
-        else:
-            st.error("Senha incorreta")
 
     st.stop()
 
 # =====================================================
-# UNIVERSO (simplificado, mas expansível)
+# UNIVERSO
 # =====================================================
 
-ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
+ATIVOS = [
+"PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
 "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
 "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
@@ -59,16 +56,21 @@ ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "WMTB34","NIKE34","ADBE34","CSCO34","INTC34","JPMC34","ORCL34",
 "QCOM34","SBUX34","TXN34","ABTT34","AMGN34","AXPB34","BERK34",
 
-"C2OL34"]
+"C2OL34"
+]
 
 # =====================================================
-# SAFE
+# SAFE ARRAY
 # =====================================================
 
 def safe(x):
     x = np.array(x, dtype=float).reshape(-1)
     x = x[~np.isnan(x)]
     return x if len(x) > 10 else None
+
+# =====================================================
+# EMA
+# =====================================================
 
 def ema(series, n):
     series = safe(series)
@@ -77,10 +79,10 @@ def ema(series, n):
     return pd.Series(series).ewm(span=n, adjust=False).mean().values
 
 # =====================================================
-# REGIME DE MERCADO
+# REGIME
 # =====================================================
 
-def detectar_regime(close):
+def regime(close):
 
     close = safe(close)
     if close is None:
@@ -100,7 +102,7 @@ def detectar_regime(close):
     return "LATERAL"
 
 # =====================================================
-# SETUP SCORE (QUALIDADE)
+# SETUP SCORE (0-100 REAL)
 # =====================================================
 
 def setup_score(preco, ema21, ema72, close):
@@ -108,65 +110,68 @@ def setup_score(preco, ema21, ema72, close):
     score = 0
 
     if preco > ema21:
-        score += 40
-
+        score += 35
     if ema21 > ema72:
-        score += 40
+        score += 35
 
     ret5 = (preco / close[-6]) - 1
 
     if ret5 > 0:
-        score += min(ret5 * 100, 30)
+        score += min(ret5 * 80, 20)
 
     dist = (preco / ema21) - 1
 
     if dist > 0.08:
-        score -= 25
+        score -= 20
     elif dist > 0.05:
-        score -= 12
+        score -= 10
 
-    return max(0, score)
-
-# =====================================================
-# EDGE INSTITUCIONAL
-# =====================================================
-
-def regime_multiplier(regime):
-
-    if regime == "TENDENCIA":
-        return 1.35
-
-    if regime == "LATERAL":
-        return 0.95
-
-    if regime == "VOLATIL":
-        return 0.7
-
-    return 1
-
-
-def edge(setup, prob, regime):
-
-    return setup * regime_multiplier(regime) * (prob / 100)
+    return max(0, min(score, 100))
 
 # =====================================================
-# TARGET FIXO (RISCO CONTROLADO)
+# PROBABILIDADE CALIBRADA (SEM SATURAÇÃO)
+# =====================================================
+
+def probabilidade(setup):
+
+    # normalização suave (evita 100% artificial)
+    return 100 * (setup / (setup + 40))
+
+# =====================================================
+# EDGE (ESTÁVEL E LIMITADO)
+# =====================================================
+
+def edge(setup, prob, reg):
+
+    mult = {
+        "TENDENCIA": 1.15,
+        "LATERAL": 1.0,
+        "VOLATIL": 0.75
+    }
+
+    raw = setup * (prob / 100) * mult.get(reg, 1)
+
+    # normalização realista (evita explosão)
+    return round(min(raw / 1.5, 100), 2)
+
+# =====================================================
+# TARGET FIXO
 # =====================================================
 
 def targets(preco):
 
-    gain = preco * 1.06   # +6%
-    stop = preco * 0.96   # -4%
+    gain = preco * 1.06
+    stop = preco * 0.96
 
-    return round(gain,2), round(stop,2)
+    return round(gain, 2), round(stop, 2)
 
 # =====================================================
-# ANALISAR ATIVO
+# ANALISAR
 # =====================================================
 
-def analisar(ticker):
+def analisar(t):
 
-    df = yf.download(ticker + ".SA",
+    df = yf.download(t + ".SA",
                      period="300d",
                      interval="1d",
                      auto_adjust=True,
@@ -176,7 +181,6 @@ def analisar(ticker):
         return None
 
     close = safe(df["Close"])
-    volume = safe(df["Volume"])
 
     if close is None:
         return None
@@ -186,27 +190,23 @@ def analisar(ticker):
     ema21 = ema(close, 21)
     ema72 = ema(close, 72)
 
-    regime = detectar_regime(close)
+    reg = regime(close)
 
     setup = setup_score(preco, ema21[-1], ema72[-1], close)
 
-    trend = preco > ema21[-1] > ema72[-1]
+    prob = probabilidade(setup)
 
-    momentum = preco / close[-5] - 1
-
-    prob = (1 / (1 + np.exp(-setup * 2))) * 100
-
-    edge_val = edge(setup, prob, regime)
+    ed = edge(setup, prob, reg)
 
     gain, stop = targets(preco)
 
     return {
-        "Ativo": ticker,
+        "Ativo": t,
         "Preço": round(preco,2),
-        "Prob": round(prob,2),
+        "Regime": reg,
         "Setup": round(setup,2),
-        "Edge": round(edge_val,2),
-        "Regime": regime,
+        "Prob": round(prob,2),
+        "Edge": ed,
         "Gain": gain,
         "Stop": stop
     }
@@ -215,9 +215,9 @@ def analisar(ticker):
 # SCANNER
 # =====================================================
 
-st.title("🏦 EXECUÇÃO AUTOMÁTICA - PRO DESK")
+st.title("🏦 PRO DESK - ENGINE ESTÁVEL")
 
-if st.button("RODAR MESA"):
+if st.button("ESCANEAR MERCADO"):
 
     resultados = []
 
@@ -225,33 +225,24 @@ if st.button("RODAR MESA"):
 
         r = analisar(t)
 
-        if r and r["Edge"] > 5:   # FILTRO INSTITUCIONAL
+        if r:
             resultados.append(r)
 
     df = pd.DataFrame(resultados)
 
     if df.empty:
-        st.warning("Nenhum trade com edge suficiente hoje.")
+        st.warning("Sem dados")
         st.stop()
 
-    # =================================================
-    # RANKING FINAL
-    # =================================================
+    # ranking correto
+    df = df.sort_values("Edge", ascending=False)
 
-    df = df.sort_values("Edge", ascending=False).reset_index(drop=True)
-
-    df.index = df.index + 1
+    df.index = range(1, len(df) + 1)
     df.insert(0, "Rank", df.index)
 
-    # =================================================
-    # TOP EXECUÇÃO (FOCO REAL)
-    # =================================================
-
-    top = df.head(8)
-
-    st.subheader("🏆 TOP TRADES DO DIA (EXECUÇÃO)")
+    st.subheader("📊 TODOS OS ATIVOS (EDGE REAL)")
 
     st.dataframe(
-        top[["Rank","Ativo","Regime","Preço","Prob","Setup","Edge","Gain","Stop"]],
+        df[["Rank","Ativo","Regime","Preço","Setup","Prob","Edge","Gain","Stop"]],
         use_container_width=True
     )
