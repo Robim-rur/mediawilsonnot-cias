@@ -3,44 +3,19 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import math
-import time
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # =====================================================
 # CONFIG
 # =====================================================
 
 st.set_page_config(
-    page_title="BUY SIDE TERMINAL V3.2 ELITE",
+    page_title="BUY SIDE TERMINAL V4.1 FULL",
     page_icon="🏹",
     layout="wide"
 )
 
 SENHA = "LUCRO5"
-
-# =====================================================
-# CSS
-# =====================================================
-
-st.markdown("""
-<style>
-.main {background:#0e1117;}
-.stTextInput input {
-    background:#161b22 !important;
-    color:white !important;
-}
-.stButton button {
-    width:100%;
-    height:44px;
-    border-radius:10px;
-}
-.stMetric {
-    background:#161b22;
-    padding:14px;
-    border-radius:10px;
-    border:1px solid #30363d;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # =====================================================
 # LOGIN
@@ -50,342 +25,229 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🏹 BUY SIDE TERMINAL V3.2")
-    st.subheader("Área Restrita")
+    st.title("🏹 BUY SIDE TERMINAL V4.1 FULL")
 
-    senha_input = st.text_input("Digite a senha:", type="password")
+    senha = st.text_input("Senha:", type="password")
 
-    if st.button("🔐 ENTRAR"):
-        if senha_input == SENHA:
+    if st.button("ENTRAR"):
+        if senha == SENHA:
             st.session_state.logado = True
             st.rerun()
         else:
-            st.error("Senha incorreta.")
+            st.error("Senha incorreta")
 
     st.stop()
 
 # =====================================================
-# LISTA DE ATIVOS
+# LISTA COMPLETA (SUA LISTA RESTAURADA)
 # =====================================================
 
 ATIVOS = [
-    "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
-    "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
-    "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
-    "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
-    "JBSS3","BEEF3","MRFG3","BRFS3","SLCE3","SMTO3","B3SA3","BBSE3",
-    "BPAC11","SANB11","ITSA4","BRSR6","CXSE3","POMO4","STBP3","TUPY3",
-    "DIRR3","CYRE3","EZTC3","JHSF3","KEPL3","POSI3","MOVI3","PETZ3",
-    "COGN3","YDUQ3","MGLU3","NTCO3","AZUL4","GOLL4","CVCB3","RRRP3",
-    "RECV3","ENAT3","ORVR3","AURE3","ENEV3","UGPA3",
-    "BOVA11","IVVB11","SMAL11","HASH11","GOLD11",
-    "HGLG11","XPLG11","VISC11","MXRF11","KNRI11",
-    "AAPL34","AMZO34","GOGL34","MSFT34","TSLA34",
-    "META34","NFLX34","NVDC34","MELI34","BABA34",
-    "C2OL34"
+"RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4","B3SA3","BBAS3","BBDC3",
+"BBDC4","BBSE3","BEEF3","BPAC11","BRAP4","BRFS3","BRKM5","CCRO3","CMIG4","CMIN3",
+"COGN3","CPFE3","CPLE6","CRFB3","CSAN3","CSNA3","CYRE3","DXCO3","EGIE3","ELET3",
+"ELET6","EMBR3","ENEV3","ENGI11","EQTL3","EZTC3","FLRY3","GGBR4","GOAU4","GOLL4",
+"HAPV3","HYPE3","ITSA4","ITUB4","JBSS3","KLBN11","LREN3","LWSA3","MGLU3","MRFG3",
+"MRVE3","MULT3","NTCO3","PETR3","PETR4","PRIO3","RADL3","RAIL3","RAIZ4","RENT3",
+"RECV3","SANB11","SBSP3","SLCE3","SMTO3","SUZB3","TAEE11","TIMS3","TTEN3","TOTS3",
+"TRPL4","UGPA3","USIM5","VALE3","VIVT3","VIVA3","WEGE3","YDUQ3","AURE3","BHIA3",
+"CASH3","CVCB3","DIRR3","ENAT3","GMAT3","IFCM3","INTB3","JHSF3","KEPL3","MOVI3",
+"ORVR3","PETZ3","PLAS3","POMO4","POSI3","RANI3","RAPT4","STBP3","TEND3","TUPY3",
+"BRSR6","CXSE3","AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34","NFLX34",
+"NVDC34","MELI34","BABA34","DISB34","PYPL34","JNJB34","PGCO34","KOCH34","VISA34",
+"WMTB34","NIKE34","ADBE34","AVGO34","CSCO34","COST34","CVSH34","GECO34","GSGI34",
+"HDCO34","INTC34","JPMC34","MAEL34","MCDP34","MDLZ34","MRCK34","ORCL34","PEP334",
+"PFIZ34","PMIC34","QCOM34","SBUX34","TGTB34","TMOS34","TXN34","UNHH34","UPSB34",
+"VZUA34","ABTT34","AMGN34","AXPB34","BAOO34","CATP34","C2OL34","HONB34","BOVA11",
+"IVVB11","SMAL11","HASH11","GOLD11","GARE11","HGLG11","XPLG11","VILG11","BRCO11",
+"BTLG11","XPML11","VISC11","HSML11","MALL11","KNRI11","JSRE11","PVBI11","HGRE11",
+"MXRF11","KNCR11","KNIP11","CPTS11","IRDM11","DIVO11","NDIV11","SPUB11"
 ]
 
-ATIVOS = list(dict.fromkeys(ATIVOS))
-
 # =====================================================
-# FUNÇÕES
+# DADOS
 # =====================================================
 
-@st.cache_data(ttl=900)
-def baixar_dados(ticker):
+@st.cache_data(ttl=600)
+def get_data(t):
+    df = yf.download(t + ".SA", period="300d", interval="1d", auto_adjust=True, progress=False)
 
-    try:
-        df = yf.download(
-            ticker + ".SA",
-            period="260d",
-            interval="1d",
-            auto_adjust=True,
-            progress=False
-        )
-
-        if df.empty:
-            return None
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        cols = ["Open","High","Low","Close","Volume"]
-        df = df[cols].copy()
-
-        for c in cols:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-        df = df.ffill().dropna()
-
-        if len(df) < 120:
-            return None
-
-        return df
-
-    except:
+    if df.empty:
         return None
 
+    df = df.ffill().bfill()
+    return df
 
-def ema(series, n):
-    return series.ewm(span=n, adjust=False).mean()
+def ema(s,n):
+    return s.ewm(span=n, adjust=False).mean()
 
+def atr(df):
+    h,l,c = df["High"],df["Low"],df["Close"]
+    tr = pd.concat([h-l, abs(h-c.shift(1)), abs(l-c.shift(1))], axis=1).max(axis=1)
+    return tr.rolling(14).mean()
 
-def wilson_score(pos, total):
-    if total == 0:
-        return 0
-
-    z = 1.96
-    phat = pos / total
-    den = 1 + z**2/total
-    num = phat + z**2/(2*total) - z * math.sqrt(
-        (phat*(1-phat)+z**2/(4*total))/total
-    )
-    return max(0, num/den)
-
-
-def calc_obv(close, volume):
-
-    obv = np.zeros(len(close))
-
-    for i in range(1, len(close)):
-        if close[i] > close[i-1]:
-            obv[i] = obv[i-1] + volume[i]
-        elif close[i] < close[i-1]:
-            obv[i] = obv[i-1] - volume[i]
+def obv(c,v):
+    o = np.zeros(len(c))
+    for i in range(1,len(c)):
+        if c[i] > c[i-1]:
+            o[i] = o[i-1] + v[i]
+        elif c[i] < c[i-1]:
+            o[i] = o[i-1] - v[i]
         else:
-            obv[i] = obv[i-1]
+            o[i] = o[i-1]
+    return o
 
-    return obv
+def wilson(x,n):
+    if n == 0:
+        return 0
+    z = 1.96
+    ph = x/n
+    return (ph + z*z/(2*n)) / (1 + z*z/n)
 
+# =====================================================
+# MOTOR V4.1 FULL
+# =====================================================
 
-def atr(df, periodo=14):
+def analisar(t):
 
-    high = df["High"]
-    low = df["Low"]
-    close = df["Close"]
-
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-    return tr.rolling(periodo).mean()
-
-
-def analisar_ativo(ticker):
-
-    df = baixar_dados(ticker)
-
+    df = get_data(t)
     if df is None:
         return None
 
-    close = df["Close"].values.astype(float)
-    volume = df["Volume"].values.astype(float)
+    close = df["Close"].values
+    vol = df["Volume"].values
+    price = float(close[-1])
 
-    preco = float(close[-1])
+    ema21 = ema(df["Close"],21).values
+    ema72 = ema(df["Close"],72).values
 
-    ema21 = ema(df["Close"], 21).values
-    ema72 = ema(df["Close"], 72).values
+    atr_v = float(atr(df).iloc[-1])
 
-    obv = calc_obv(close, volume)
+    ob = obv(close, vol)
 
-    atr_val = float(atr(df).iloc[-1])
+    # =========================
+    # SENTIMENTO
+    # =========================
 
-    score = 0
+    try:
+        analyzer = SentimentIntensityAnalyzer()
+        news = yf.Ticker(t+".SA").news
 
-    if preco > ema21[-1]:
-        score += 15
+        titles = [n["title"] for n in news[:10] if "title" in n]
 
-    if ema21[-1] > ema72[-1]:
-        score += 15
+        if len(titles) > 0:
+            sentiment = np.mean([analyzer.polarity_scores(x)["compound"] for x in titles])
+        else:
+            sentiment = 0
+    except:
+        sentiment = 0
 
-    if ema21[-1] > ema21[-5]:
-        score += 10
+    # =========================
+    # SCORE
+    # =========================
 
-    ret5 = ((preco / close[-6]) - 1) * 100
+    score = 50
 
+    if price > ema21[-1]: score += 10
+    if ema21[-1] > ema72[-1]: score += 10
+    if ema21[-1] > ema21[-5]: score += 5
+
+    ret5 = ((price/close[-6]) - 1)*100
     if ret5 > 0:
-        score += min(ret5 * 2, 10)
+        score += min(ret5*1.5, 8)
 
-    dist = ((preco / ema21[-1]) - 1) * 100
+    if vol[-1] > np.mean(vol[-20:]):
+        score += 7
 
-    if dist > 8:
-        score -= 15
-    elif dist > 6:
+    if ob[-1] > ob[-5]:
+        score += 5
+
+    if sentiment > 0.1:
+        score += 5
+
+    dist = ((price/ema21[-1]) - 1)*100
+    if dist > 7:
         score -= 8
 
-    media_vol = np.mean(volume[-20:])
+    score = max(0,min(score,100))
 
-    if volume[-1] > media_vol:
-        score += 10
+    # =========================
+    # PROBABILIDADE
+    # =========================
 
-    if obv[-1] > obv[-5]:
-        score += 10
+    prob = score * 0.92
+    prob = max(1,min(prob,99))
 
-    checks = [
-        preco > ema21[-1],
-        ema21[-1] > ema72[-1],
-        ret5 > 0,
-        volume[-1] > media_vol,
-        obv[-1] > obv[-5]
-    ]
+    # =========================
+    # STOP / GAIN
+    # =========================
 
-    wil = wilson_score(sum(checks), len(checks)) * 100
+    stop_pct = max(2.0, min((atr_v/price)*100*1.25, 6.5))
+    gain_pct = min(stop_pct * (prob/60), 12)
 
-    prob = (score * 0.60) + (wil * 0.40)
-    prob = max(1, min(prob, 99))
-
-    # Stop Inteligente
-    stop_pct = max(2.0, min((atr_val / preco) * 100 * 1.4, 6.0))
-    stop_r = preco * (1 - stop_pct / 100)
-
-    # Gain Potencial
-    gain_pct = max(2.0, min(stop_pct * (prob / 60), 12.0))
-    gain_r = preco * (1 + gain_pct / 100)
-
-    # RR
     rr = gain_pct / stop_pct
 
-    if prob >= 85:
-        status = "🟢 PREMIUM"
-    elif prob >= 78:
-        status = "🟢 FORTE"
-    elif prob >= 72:
-        status = "🟡 BOA"
-    elif prob >= 70:
-        status = "🟠 OPERÁVEL"
+    # =========================
+    # EV
+    # =========================
+
+    p = prob/100
+    ev = (p * gain_pct) - ((1-p) * stop_pct)
+
+    # =========================
+    # STATUS
+    # =========================
+
+    if ev > 1.5:
+        status = "🟢 MUITO FAVORÁVEL"
+    elif ev > 0.8:
+        status = "🟢 FAVORÁVEL"
+    elif ev > 0:
+        status = "🟡 NEUTRO POSITIVO"
     else:
-        status = "🔴 FORA"
+        status = "🔴 EV NEGATIVO"
 
     return {
-        "Ativo": ticker,
-        "Preço": round(preco,2),
-        "Probabilidade %": round(prob,1),
+        "Ativo": t,
+        "Preço": round(price,2),
+        "Prob %": round(prob,1),
         "Gain %": round(gain_pct,2),
-        "Gain R$": round(gain_r,2),
         "Stop %": round(stop_pct,2),
-        "Stop R$": round(stop_r,2),
         "RR": round(rr,2),
-        "Status": status,
-        "df": df,
-        "ema21": ema21,
-        "ema72": ema72
+        "EV": round(ev,2),
+        "Sentimento": round(sentiment,2),
+        "Status": status
     }
-
-# =====================================================
-# MENU
-# =====================================================
-
-with st.sidebar:
-
-    st.title("🏹 MENU")
-
-    modo = st.radio(
-        "Escolha:",
-        ["Scanner Inteligente", "Ativo Específico"]
-    )
 
 # =====================================================
 # SCANNER
 # =====================================================
 
-if modo == "Scanner Inteligente":
+st.title("🏹 V4.1 FULL — UNIVERSO COMPLETO")
 
-    st.title("🏹 Scanner Inteligente V3.2")
+if st.button("ESCANEAR MERCADO"):
 
-    if st.button("🚀 ESCANEAR MERCADO"):
+    res = []
 
-        resultados = []
-        barra = st.progress(0)
+    prog = st.progress(0)
 
-        total = len(ATIVOS)
+    for i,a in enumerate(ATIVOS):
 
-        for i, ativo in enumerate(ATIVOS):
+        r = analisar(a)
 
-            r = analisar_ativo(ativo)
+        if r and r["Prob %"] >= 65 and r["EV"] > -0.2:
+            res.append(r)
 
-            if r:
-                if r["Probabilidade %"] >= 70 and r["RR"] >= 1.0:
-                    resultados.append(r)
+        prog.progress((i+1)/len(ATIVOS))
 
-            barra.progress((i+1)/total)
+    if len(res) == 0:
+        st.warning("Nenhuma oportunidade encontrada.")
 
-        if len(resultados) == 0:
-            st.warning("Nenhum ativo operável hoje.")
+    else:
 
-        else:
+        df = pd.DataFrame(res)
+        df = df.sort_values(["EV","Prob %"], ascending=False)
 
-            tabela = pd.DataFrame(resultados)
+        st.success(f"{len(df)} ativos encontrados")
 
-            tabela = tabela[
-                [
-                    "Ativo","Preço","Probabilidade %",
-                    "Gain %","Gain R$",
-                    "Stop %","Stop R$",
-                    "RR","Status"
-                ]
-            ]
-
-            tabela = tabela.sort_values(
-                by=["Probabilidade %","RR"],
-                ascending=False
-            )
-
-            st.success(f"{len(tabela)} ativos operáveis encontrados.")
-
-            st.dataframe(
-                tabela,
-                use_container_width=True,
-                hide_index=True
-            )
-
-# =====================================================
-# INDIVIDUAL
-# =====================================================
-
-else:
-
-    st.title("🏹 Análise Individual")
-
-    ticker = st.text_input(
-        "Digite o ticker:",
-        "PETR4"
-    ).upper().replace(".SA","")
-
-    if st.button("🔎 ANALISAR"):
-
-        r = analisar_ativo(ticker)
-
-        if r is None:
-            st.error("Ativo inválido ou sem dados.")
-        else:
-
-            c1,c2,c3,c4 = st.columns(4)
-
-            c1.metric("Preço", f"R$ {r['Preço']}")
-            c2.metric("Probabilidade", f"{r['Probabilidade %']}%")
-            c3.metric("Gain", f"{r['Gain %']}%")
-            c4.metric("RR", f"{r['RR']}")
-
-            c5,c6 = st.columns(2)
-
-            c5.metric("Stop", f"{r['Stop %']}%")
-            c6.metric("Status", r["Status"])
-
-            graf = pd.DataFrame({
-                "Preço": r["df"]["Close"],
-                "EMA21": r["ema21"],
-                "EMA72": r["ema72"]
-            }, index=r["df"].index)
-
-            st.line_chart(graf)
-
-# =====================================================
-# RODAPÉ
-# =====================================================
-
-st.markdown("---")
-st.caption(
-    f"BUY SIDE TERMINAL V3.2 ELITE | {time.strftime('%d/%m/%Y %H:%M:%S')}"
-)
+        st.dataframe(df, use_container_width=True)
