@@ -6,26 +6,42 @@ import math
 import time
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Buy-Side Wilson Score Pro", layout="wide")
+# ==========================================
+# 1. CONFIGURAÇÕES E ESTILO
+# ==========================================
+st.set_page_config(
+    page_title="Buy-Side Terminal | Wilson Score",
+    page_icon="🏹",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- FUNÇÕES MATEMÁTICAS E ESTATÍSTICAS ---
+# Custom CSS para melhorar a estética do terminal
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
+    .stSuccess { background-color: #052316; }
+    </style>
+    """, unsafe_allow_html=True)
 
-def wilson_score(positivos, total, confidence=0.95):
-    """Calcula a probabilidade de sucesso usando o limite inferior de Wilson."""
+# ==========================================
+# 2. MOTORES DE CÁLCULO (Estatística e Técnica)
+# ==========================================
+
+def wilson_score(positivos, total):
+    """Calcula a probabilidade real baseada no Intervalo de Wilson."""
     if total == 0: return 0
-    z = 1.96  # Nível de confiança de 95%
+    z = 1.96  # 95% Confiança
     phat = positivos / total
     denominador = 1 + z**2/total
     numerador = phat + z**2/(2*total) - z * math.sqrt((phat*(1-phat) + z**2/(4*total))/total)
     return max(0, numerador / denominador)
 
 def calcular_sar_parabolico(df, af=0.02, max_af=0.2):
-    """Implementação manual do SAR Parabólico para evitar dependências extras."""
+    """Cálculo manual do SAR para garantir precisão no Momentum."""
     df = df.copy()
-    high = df['High']
-    low = df['Low']
-    close = df['Close']
+    high, low, close = df['High'], df['Low'], df['Close']
     sar = close.copy()
     uptrend = True
     ep = high.iloc[0]
@@ -56,139 +72,135 @@ def calcular_sar_parabolico(df, af=0.02, max_af=0.2):
                     af_current = min(af_current + af, max_af)
     return sar
 
-@st.cache_data(ttl=600)
-def obter_dados_yahoo(ticker_b3):
-    """Busca dados com lógica de repetição para evitar erros de Rate Limit."""
-    max_tentativas = 3
-    for i in range(max_tentativas):
-        try:
-            # Forçamos o ticker correto
-            if not ticker_b3.endswith(".SA"):
-                ticker_b3 += ".SA"
-            
-            ativo = yf.Ticker(ticker_b3)
-            # O yfinance v0.2.40+ lida melhor com curl_cffi internamente
-            hist = ativo.history(period="100d")
-            
-            if not hist.empty:
-                return ativo, hist
-            time.sleep(1) # Pequena pausa entre tentativas
-        except Exception as e:
-            if i == max_tentativas - 1:
-                raise e
-            time.sleep(2)
-    return None, None
+# ==========================================
+# 3. GERENCIAMENTO DE CACHE E DADOS
+# ==========================================
 
-# --- INTERFACE PRINCIPAL ---
+@st.cache_resource(ttl=600)
+def obter_ticker_seguro(ticker):
+    """Mantém a conexão com o objeto Ticker viva no recurso."""
+    return yf.Ticker(ticker)
 
-st.title("🏹 Analista Buy-Side: Confluência de Wilson")
-st.markdown("""
-Este aplicativo cruza dados técnicos e sentimentais para gerar uma probabilidade estatística de alta.
-**Pilares:** Tendência (EMA21), Volume (OBV), Momentum (SAR) e Notícias (VADER).
-""")
+@st.cache_data(ttl=300)
+def buscar_historico_completo(ticker):
+    """Baixa e limpa os dados históricos."""
+    df = yf.download(ticker, period="100d", interval="1d", progress=False)
+    if df.empty: return None
+    # Limpeza básica de NaNs que podem quebrar o SAR
+    df = df.ffill().dropna()
+    return df
 
-# Sidebar
-st.sidebar.header("Configurações do Scanner")
-ticker_input = st.sidebar.text_input("Digite o Ticker (B3):", "PETR4").upper()
-dias_obv = st.sidebar.slider("Janela de Volume (Dias):", 3, 10, 5)
+# ==========================================
+# 4. INTERFACE DO USUÁRIO (UI)
+# ==========================================
 
-if st.sidebar.button("GERAR ANÁLISE COMPLETA"):
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2534/2534354.png", width=80)
+    st.header("Terminal Buy-Side")
+    ticker_raw = st.text_input("Ticker da B3:", "PETR4").upper()
+    ticker_sa = ticker_raw if ticker_raw.endswith(".SA") else f"{ticker_raw}.SA"
+    
+    st.divider()
+    st.write("**Parâmetros de Risco:**")
+    stop_fixo = st.number_input("Stop Loss Fixo (%)", value=5.0)
+    target_fixo = st.number_input("Gain Alvo (%)", value=8.0)
+    
+    btn_analise = st.button("🚀 EXECUTAR SCANNER", use_container_width=True)
+
+if btn_analise:
     try:
-        with st.spinner(f"Analisando {ticker_input}..."):
-            # 1. Coleta de Dados
-            acao, hist = obter_dados_yahoo(ticker_input)
+        with st.spinner(f"Processando confluências para {ticker_raw}..."):
+            # A. CAPTURA DE DADOS
+            ticker_obj = obter_ticker_seguro(ticker_sa)
+            hist = buscar_historico_completo(ticker_sa)
             
-            if hist is None or hist.empty:
-                st.error("Não foi possível obter dados. O Yahoo Finance pode estar bloqueando a conexão.")
+            if hist is None:
+                st.error("Erro: Ativo não encontrado ou sem liquidez.")
             else:
-                # 2. Cálculos Técnicos
+                # B. PROCESSAMENTO TÉCNICO
+                preco_atual = hist['Close'].iloc[-1]
+                
                 # EMA 21
                 ema21 = hist['Close'].ewm(span=21, adjust=False).mean()
                 
                 # OBV (On-Balance Volume)
-                obv_values = [0]
+                obv_list = [0]
                 for i in range(1, len(hist)):
                     if hist['Close'].iloc[i] > hist['Close'].iloc[i-1]:
-                        obv_values.append(obv_values[-1] + hist['Volume'].iloc[i])
+                        obv_list.append(obv_list[-1] + hist['Volume'].iloc[i])
                     elif hist['Close'].iloc[i] < hist['Close'].iloc[i-1]:
-                        obv_values.append(obv_values[-1] - hist['Volume'].iloc[i])
+                        obv_list.append(obv_list[-1] - hist['Volume'].iloc[i])
                     else:
-                        obv_values.append(obv_values[-1])
-                hist['OBV'] = obv_values
+                        obv_list.append(obv_list[-1])
+                hist['OBV'] = obv_list
                 
-                # SAR Parabólico
+                # SAR
                 hist['SAR'] = calcular_sar_parabolico(hist)
                 
-                # 3. Análise de Sentimento (NLP)
+                # C. ANÁLISE DE SENTIMENTO
                 analyzer = SentimentIntensityAnalyzer()
-                # Personalização para o "Financês"
-                analyzer.lexicon.update({'lucro': 4.0, 'dividendos': 3.5, 'recorde': 3.0, 'alta': 2.0, 'ebitda': 2.5})
+                # Dicionário calibrado para o mercado financeiro
+                analyzer.lexicon.update({'lucro': 4.0, 'dividendos': 3.5, 'alta': 2.0, 'ebitda': 2.5, 'recorde': 3.0})
                 
-                news = acao.news
-                titulos = [n['title'] for n in news[:12]]
-                sent_scores = [analyzer.polarity_scores(t)['compound'] for t in titulos]
-                media_sentimento = sum(sent_scores) / len(sent_scores) if sent_scores else 0
+                noticias = ticker_obj.news
+                titulos = [n['title'] for n in noticias[:12]]
+                scores = [analyzer.polarity_scores(t)['compound'] for t in titulos]
+                score_sent = sum(scores)/len(scores) if scores else 0
                 
-                # 4. Cálculo da Probabilidade de Wilson
-                sinais_positivos = 0
-                total_testes = 4
+                # D. VALIDAÇÃO DOS 4 PILARES (CONFLUÊNCIA)
+                c1 = preco_atual > ema21.iloc[-1]
+                c2 = hist['OBV'].iloc[-1] > hist['OBV'].iloc[-5]
+                c3 = score_sent > 0.12
+                c4 = hist['SAR'].iloc[-1] < preco_atual
                 
-                # Condição 1: Preço acima da EMA21
-                cond_ema = hist['Close'].iloc[-1] > ema21.iloc[-1]
-                # Condição 2: OBV subindo na janela escolhida
-                cond_obv = hist['OBV'].iloc[-1] > hist['OBV'].iloc[-(dias_obv + 1)]
-                # Condição 3: Sentimento positivo
-                cond_sent = media_sentimento > 0.10
-                # Condição 4: SAR Parabólico abaixo do preço (Sinal de Compra)
-                cond_sar = hist['SAR'].iloc[-1] < hist['Close'].iloc[-1]
+                sinais = sum([c1, c2, c3, c4])
+                confianca_wilson = wilson_score(sinais, 4) * 100
                 
-                if cond_ema: sinais_positivos += 1
-                if cond_obv: sinais_positivos += 1
-                if cond_sent: sinais_positivos += 1
-                if cond_sar: sinais_positivos += 1
+                # E. OUTPUT DE RESULTADOS
+                st.subheader(f"Análise Estratégica: {ticker_raw}")
                 
-                prob_wilson = wilson_score(sinais_positivos, total_testes) * 100
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
+                m2.metric("Score Wilson", f"{confianca_wilson:.1f}%")
+                m3.metric("Stop Loss", f"R$ {preco_atual * (1 - stop_fixo/100):.2f}")
+                m4.metric("Gain Alvo", f"R$ {preco_atual * (1 + target_fixo/100):.2f}")
                 
-                # --- EXIBIÇÃO DOS RESULTADOS ---
                 st.divider()
-                col_score, col_check = st.columns([1, 2])
                 
-                with col_score:
-                    st.metric("Score de Confiança (Wilson)", f"{prob_wilson:.1f}%")
-                    if prob_wilson >= 60:
-                        st.success("🎯 ALTA ASSERTIVIDADE: COMPRA")
-                    elif prob_wilson >= 35:
-                        st.warning("⚖️ CONFLUÊNCIA MÉDIA: AGUARDAR")
-                    else:
-                        st.error("⚠️ BAIXA ASSERTIVIDADE: FORA")
+                col_info, col_chart = st.columns([1, 2])
+                
+                with col_info:
+                    st.write("### ✅ Checklist de Compra")
+                    st.write(f"{'🟢' if c1 else '🔴'} **Tendência:** {'Acima' if c1 else 'Abaixo'} da EMA21")
+                    st.write(f"{'🟢' if c2 else '🔴'} **Volume:** {'Acumulando' if c2 else 'Distribuindo'} (OBV)")
+                    st.write(f"{'🟢' if c3 else '🔴'} **Mídia:** {'Otimista' if c3 else 'Pessimista/Neutra'}")
+                    st.write(f"{'🟢' if c4 else '🔴'} **SAR:** {'Sinal de Compra' if c4 else 'Sinal de Venda'}")
                     
-                    st.write(f"Preço Atual: **R$ {hist['Close'].iloc[-1]:.2f}**")
-                    st.write(f"Sentimento Médio: **{media_sentimento:.2f}**")
-                
-                with col_check:
-                    st.subheader("Checklist Buy-Side")
-                    st.write(f"{'✅' if cond_ema else '❌'} Tendência de Alta (Preço > EMA21)")
-                    st.write(f"{'✅' if cond_obv else '❌'} Pressão de Volume (OBV em Alta)")
-                    st.write(f"{'✅' if cond_sent else '❌'} Clima do Mercado (Sentimento)")
-                    st.write(f"{'✅' if cond_sar else '❌'} Momentum SAR (Suporte Ativo)")
+                    st.write("---")
+                    if confianca_wilson >= 60:
+                        st.success("**VEREDITO:** ALTA PROBABILIDADE DE SUCESSO (BUY SIDE)")
+                    elif confianca_wilson >= 35:
+                        st.warning("**VEREDITO:** AGUARDAR CONFLUÊNCIA DOS INDICADORES")
+                    else:
+                        st.error("**VEREDITO:** RISCO ESTATÍSTICO ALTO - FIQUE DE FORA")
 
-                # Gráfico
-                st.subheader("Gráfico de Preço e Indicadores")
-                df_grafico = pd.DataFrame({
-                    'Preço': hist['Close'],
-                    'EMA 21': ema21,
-                    'SAR': hist['SAR']
-                })
-                st.line_chart(df_grafico)
-                
-                # Exibição de Notícias
-                with st.expander("Ver manchetes analisadas"):
+                with col_chart:
+                    st.write("### Gráfico de Médias e SAR")
+                    chart_data = pd.DataFrame({
+                        'Preço': hist['Close'],
+                        'EMA 21': ema21,
+                        'SAR': hist['SAR']
+                    })
+                    st.line_chart(chart_data)
+
+                with st.expander("📄 Ver Manchetes Analisadas pela IA"):
                     for t in titulos:
                         st.write(f"- {t}")
 
     except Exception as e:
-        st.error(f"Erro crítico no sistema: {e}")
-        st.info("Dica: Verifique se o arquivo requirements.txt inclui 'yfinance', 'vaderSentiment' e 'pandas'.")
+        st.error(f"Erro no processamento do ativo {ticker_raw}. Verifique a conexão.")
+        st.exception(e)
 
+# Rodapé de Monitoramento Profissional
 st.markdown("---")
-st.caption("Aviso: Este app é uma ferramenta de apoio. Decisões financeiras envolvem risco. Mantenha seu Stop Loss fixo.")
+st.caption(f"Última atualização do sistema: {time.strftime('%H:%M:%S')} | Modo: Somente Compra (Buy Side) | Fonte: Yahoo Finance")
