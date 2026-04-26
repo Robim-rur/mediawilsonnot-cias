@@ -1,3 +1,7 @@
+# =====================================================
+# BUY SIDE TERMINAL V4 ELITE - STATISTICAL FIX CORE
+# =====================================================
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -10,7 +14,7 @@ import time
 # =====================================================
 
 st.set_page_config(
-    page_title="BUY SIDE TERMINAL V4 ELITE HC",
+    page_title="V4 ELITE STAT FIX",
     page_icon="🏹",
     layout="wide"
 )
@@ -26,7 +30,7 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏹 V4 ELITE HC - INSTITUTIONAL FULL ENGINE")
+    st.title("🏹 V4 ELITE STATISTICAL ENGINE")
 
     senha = st.text_input("Senha:", type="password")
 
@@ -40,11 +44,10 @@ if not st.session_state.logado:
     st.stop()
 
 # =====================================================
-# UNIVERSO (MANTIDO CONFORME SUA BASE)
+# UNIVERSO (mantido)
 # =====================================================
 
-ATIVOS = [
-"PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
+ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
 "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
 "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
@@ -64,233 +67,133 @@ ATIVOS = [
 "WMTB34","NIKE34","ADBE34","CSCO34","INTC34","JPMC34","ORCL34",
 "QCOM34","SBUX34","TXN34","ABTT34","AMGN34","AXPB34","BERK34",
 
-"C2OL34"
-]
+"C2OL34"]
 
 # =====================================================
-# SAFE DATA ENGINE (CRÍTICO)
+# SAFE DATA ENGINE
 # =====================================================
 
-def safe_array(x):
-
-    x = np.array(x, dtype=float)
-
-    # garante 1D
-    x = x.reshape(-1)
-
-    # remove NaN
-    x = x[~np.isnan(x)]
-
-    if len(x) < 5:
-        return None
-
-    return x
+def safe(s):
+    s = np.array(s, dtype=float).reshape(-1)
+    s = s[~np.isnan(s)]
+    return s if len(s) > 5 else None
 
 # =====================================================
-# EMA SAFE (CORRIGIDA DEFINITIVA)
+# EMA
 # =====================================================
 
-def ema(series, n):
-
-    s = safe_array(series)
-
-    if s is None or len(s) < n:
-        return np.zeros(len(series))
-
+def ema(s, n):
+    s = safe(s)
+    if s is None:
+        return np.zeros(10)
     return pd.Series(s).ewm(span=n, adjust=False).mean().values
 
 # =====================================================
-# SAFE RETURNS
+# RETURNS / VOLATILITY
 # =====================================================
 
-def safe_returns(close):
-
-    c = safe_array(close)
-
-    if c is None or len(c) < 2:
+def returns(s):
+    s = safe(s)
+    if s is None or len(s) < 2:
         return None
-
-    denom = np.where(c[:-1] == 0, np.nan, c[:-1])
-
-    r = np.diff(c) / denom
-
-    r = r[~np.isnan(r)]
-
-    if len(r) == 0:
-        return None
-
-    return r
+    return np.diff(s) / s[:-1]
 
 # =====================================================
-# REGIME DETECTOR (MANTIDO + ESTABILIZADO)
+# SCORE BASE (RAW EDGE SIGNAL)
 # =====================================================
 
-def detectar_regime(df):
-
-    close = safe_array(df["Close"].values)
-
-    if close is None:
-        return "LATERAL"
-
-    ema21 = ema(close, 21)
-
-    ret = safe_returns(close[-25:])
-    vol = np.std(ret) * 100 if ret is not None else 0
-
-    slope = ema21[-1] - ema21[-5] if len(ema21) > 5 else 0
-
-    high = np.max(close[-20:])
-    low = np.min(close[-20:])
-
-    range_pct = ((high - low) / close[-1]) * 100
-
-    if slope > 0 and vol < 3 and range_pct > 3:
-        return "TREND"
-
-    if range_pct < 2:
-        return "COMPRESSION"
-
-    if vol > 3:
-        return "VOLATILE"
-
-    return "LATERAL"
-
-# =====================================================
-# STRATEGY ENGINE (INALTERADO CONCEITUALMENTE)
-# =====================================================
-
-def strategy_weights(regime):
-
-    if regime == "TREND":
-        return {"trend":0.55,"volume":0.25,"mean":0.1,"risk":0.1}
-
-    if regime == "LATERAL":
-        return {"trend":0.2,"volume":0.2,"mean":0.5,"risk":0.1}
-
-    if regime == "VOLATILE":
-        return {"trend":0.3,"volume":0.2,"mean":0.1,"risk":0.4}
-
-    if regime == "COMPRESSION":
-        return {"trend":0.2,"volume":0.1,"mean":0.1,"risk":0.6}
-
-    return {"trend":0.3,"volume":0.3,"mean":0.2,"risk":0.2}
-
-# =====================================================
-# ANALISADOR PRINCIPAL
-# =====================================================
-
-def analisar(ticker):
-
-    df = yf.download(
-        ticker + ".SA",
-        period="300d",
-        interval="1d",
-        auto_adjust=True,
-        progress=False
-    )
-
-    if df is None or df.empty:
-        return None
-
-    # =========================
-    # SAFE CLEAN (CRÍTICO)
-    # =========================
-
-    close = safe_array(df["Close"].values)
-    volume = safe_array(df["Volume"].values)
-
-    if close is None or volume is None:
-        return None
-
-    if len(close) < 120:
-        return None
-
-    preco = close[-1]
+def raw_score(close, volume):
 
     ema21 = ema(close, 21)
     ema72 = ema(close, 72)
 
-    regime = detectar_regime(df)
-    weights = strategy_weights(regime)
+    trend = close[-1] > ema21[-1] > ema72[-1]
+    mom = close[-1] / close[-5] - 1
 
-    # =========================
-    # SINAIS
-    # =========================
+    vol_ok = volume[-1] > np.mean(volume[-20:])
 
-    trend = int(preco > ema21[-1] > ema72[-1])
-    volume_sig = int(volume[-1] > np.mean(volume[-20:]))
-    mean_rev = int(preco < ema21[-1])
+    score = 0
+    score += 1 if trend else 0
+    score += mom * 5
+    score += 1 if vol_ok else 0
 
-    ret = safe_returns(close[-10:])
-    risk = 1 - np.std(ret) if ret is not None else 0.5
+    return score
 
-    score = (
-        trend * weights["trend"] +
-        volume_sig * weights["volume"] +
-        mean_rev * weights["mean"] +
-        risk * weights["risk"]
-    )
+# =====================================================
+# ANALISADOR
+# =====================================================
 
-    # =========================
-    # PROBABILIDADE CALIBRADA (SEM COLAPSO)
-    # =========================
+def analisar(ticker):
 
-    prob = 1 / (1 + np.exp(-score * 3.5))
-    prob = prob * 100
+    df = yf.download(ticker + ".SA", period="300d", interval="1d",
+                     auto_adjust=True, progress=False)
 
-    # =========================
-    # EDGE INSTITUCIONAL (CORRETO E ESTÁVEL)
-    # =========================
+    if df is None or df.empty:
+        return None
 
-    gain_pct = 0.05
-    stop_pct = 0.035
+    close = safe(df["Close"])
+    volume = safe(df["Volume"])
 
-    edge = (prob/100 * gain_pct) - ((1 - prob/100) * stop_pct)
+    if close is None or volume is None:
+        return None
 
-    edge_pct = edge * 100
+    preco = close[-1]
+
+    score = raw_score(close, volume)
+
+    vol = returns(close)
+    vol = np.std(vol) if vol is not None else 0.01
 
     return {
         "Ativo": ticker,
-        "Preço": round(preco,2),
-        "Prob": round(prob,2),
-        "Regime": regime,
-        "EDGE (%)": round(edge_pct,3),
-        "Gain (%)": round(gain_pct*100,2),
-        "Stop (%)": round(stop_pct*100,2)
+        "Preço": preco,
+        "score": score,
+        "vol": vol
     }
 
 # =====================================================
-# SCANNER
+# SCANNER (CRÍTICO: NORMALIZAÇÃO CROSS SECTIONAL)
 # =====================================================
 
-st.title("🏹 V4 ELITE HC - INSTITUTIONAL FINAL ENGINE")
+st.title("🏹 V4 ELITE STATISTICAL FIX")
 
 if st.button("ESCANEAR MERCADO"):
 
     resultados = []
-    barra = st.progress(0)
 
-    for i, t in enumerate(ATIVOS):
-
+    for t in ATIVOS:
         r = analisar(t)
-
-        if r and r["Prob"] >= 60:
+        if r:
             resultados.append(r)
-
-        barra.progress((i+1)/len(ATIVOS))
-
-    if len(resultados) == 0:
-        st.warning("Nenhum ativo encontrado.")
-        st.stop()
 
     df = pd.DataFrame(resultados)
 
-    df = df.sort_values("EDGE (%)", ascending=False)
+    # =================================================
+    # 🔥 NORMALIZAÇÃO REAL (REMOVE PROBLEMA PRINCIPAL)
+    # =================================================
 
-    st.subheader("🏆 TOP OPPORTUNITIES")
+    df["z"] = (df["score"] - df["score"].mean()) / (df["score"].std() + 1e-9)
 
-    st.dataframe(df.head(10), use_container_width=True)
+    # =================================================
+    # PROBABILIDADE REAL (SEM SATURAÇÃO)
+    # =================================================
 
-    st.subheader("📊 REGIMES")
+    df["prob"] = 1 / (1 + np.exp(-df["z"] * 0.9))
+    df["prob"] = df["prob"] * 100
 
-    st.bar_chart(df["Regime"].value_counts())
+    # =================================================
+    # EDGE DINÂMICO REAL (SEM FIXO)
+    # =================================================
+
+    df["gain"] = df["vol"] * 2.5
+    df["stop"] = df["vol"] * 1.5
+
+    df["edge"] = (df["prob"]/100 * df["gain"]) - ((1 - df["prob"]/100) * df["stop"])
+
+    # =================================================
+    # RANKING FINAL
+    # =================================================
+
+    df = df.sort_values("edge", ascending=False)
+
+    st.dataframe(df[["Ativo","Preço","prob","edge"]], use_container_width=True)
