@@ -1,8 +1,3 @@
-# app.py
-# Buy Side Terminal PRO Safety Mode
-# Scanner Top 30 + Ativo Específico
-# Pronto para Streamlit
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -21,6 +16,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# =====================================================
+# ESTILO
+# =====================================================
+
 st.markdown("""
 <style>
 .main {background-color:#0e1117;}
@@ -30,11 +29,15 @@ st.markdown("""
     border-radius:10px;
     border:1px solid #30363d;
 }
+div[data-testid="stDataFrame"] {
+    border:1px solid #30363d;
+    border-radius:10px;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # =====================================================
-# UNIVERSO TOP 30 (ações + ETFs)
+# UNIVERSO TOP 30
 # =====================================================
 
 ATIVOS = [
@@ -63,6 +66,7 @@ def wilson_score(pos, total):
 @st.cache_data(ttl=600)
 def baixar_dados(ticker):
     tk = ticker + ".SA"
+
     df = yf.download(
         tk,
         period="180d",
@@ -74,7 +78,6 @@ def baixar_dados(ticker):
     if df.empty:
         return None
 
-    # Corrigir MultiIndex
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
@@ -143,6 +146,7 @@ def sentimento_score(ticker):
         analyzer = SentimentIntensityAnalyzer()
 
         titulos = []
+
         for n in noticias[:10]:
             t = n.get("title")
             if t:
@@ -152,21 +156,25 @@ def sentimento_score(ticker):
             return 0
 
         vals = []
+
         for t in titulos:
-            vals.append(analyzer.polarity_scores(t)["compound"])
+            vals.append(
+                analyzer.polarity_scores(t)["compound"]
+            )
 
         return float(np.mean(vals))
+
     except:
         return 0
 
 def analisar_ativo(ticker):
     df = baixar_dados(ticker)
+
     if df is None:
         return None
 
     close = df['Close'].values
     volume = df['Volume'].values
-
     preco = float(close[-1])
 
     ema21 = ema(df['Close'], 21).values
@@ -178,65 +186,60 @@ def analisar_ativo(ticker):
 
     sent = sentimento_score(ticker)
 
-    # ==========================
-    # SCORE SEGURANÇA
-    # ==========================
+    # ===================================
+    # SCORE CONSERVADOR
+    # ===================================
+
     score = 0
 
-    # Tendência forte
     c1 = preco > ema21[-1] > ema72[-1]
     if c1:
         score += 30
 
-    # Força tendência
     c2 = adx[-1] > 20 if not np.isnan(adx[-1]) else False
     if c2:
-        score += 20
+        score += 18
 
-    # Compradores dominam
     c3 = plus_di[-1] > minus_di[-1] if not np.isnan(plus_di[-1]) else False
     if c3:
         score += 15
 
-    # Volume
     c4 = obv[-1] > np.mean(obv[-10:])
     if c4:
         score += 15
 
-    # Sentimento
     c5 = sent > 0
     if c5:
-        score += 5
+        score += 7
 
-    # Momentum curto
     c6 = close[-1] > close[-3]
     if c6:
         score += 15
 
-    # Wilson baseado nos pilares
     positivos = sum([c1,c2,c3,c4,c5,c6])
+
     wil = wilson_score(positivos, 6) * 100
 
-    nota_final = (score * 0.7) + (wil * 0.3)
+    prob = (score * 0.65) + (wil * 0.35)
 
     stop = preco * (1 - 0.035)
-    alvo = preco * (1 + 0.05)
+    gain = preco * (1 + 0.05)
 
-    if nota_final >= 85:
-        status = "COMPRA FORTE"
-    elif nota_final >= 72:
-        status = "COMPRA"
-    elif nota_final >= 60:
-        status = "OBSERVAÇÃO"
+    if prob >= 85:
+        status = "🟢 PREMIUM"
+    elif prob >= 75:
+        status = "🟢 COMPRA"
+    elif prob >= 70:
+        status = "🟡 BOA"
     else:
-        status = "EVITAR"
+        status = "🔴 FORA"
 
     return {
         "Ativo": ticker,
         "Preço": round(preco,2),
-        "Score": round(nota_final,1),
+        "Probabilidade %": round(prob,1),
         "Stop": round(stop,2),
-        "Gain": round(alvo,2),
+        "Gain": round(gain,2),
         "Status": status,
         "df": df,
         "ema21": ema21,
@@ -248,43 +251,62 @@ def analisar_ativo(ticker):
 # =====================================================
 
 with st.sidebar:
+
     st.title("🏹 Buy Side PRO")
 
     modo = st.radio(
         "Modo:",
-        ["Scanner Top 30", "Ativo Específico"]
+        ["Scanner Inteligente", "Ativo Específico"]
     )
 
 # =====================================================
-# MODO SCANNER
+# SCANNER
 # =====================================================
 
-if modo == "Scanner Top 30":
+if modo == "Scanner Inteligente":
 
-    st.title("🏹 Scanner Automático Top 30")
+    st.title("🏹 Scanner Inteligente Top 30")
+    st.caption("Mostra apenas ativos com maior chance de êxito.")
 
-    if st.button("🚀 Executar Scanner", use_container_width=True):
+    if st.button("🚀 ESCANEAR MERCADO", use_container_width=True):
 
         resultados = []
 
         barra = st.progress(0)
 
         for i, ativo in enumerate(ATIVOS):
+
             r = analisar_ativo(ativo)
+
             if r:
-                resultados.append(r)
+                # MOSTRAR SOMENTE APROVADOS
+                if r["Probabilidade %"] >= 70:
+                    resultados.append(r)
 
             barra.progress((i+1)/len(ATIVOS))
 
         if len(resultados) == 0:
-            st.error("Nenhum ativo processado.")
+            st.warning("Nenhuma oportunidade forte encontrada hoje.")
+
         else:
             tabela = pd.DataFrame(resultados)
+
             tabela = tabela[
-                ["Ativo","Preço","Score","Stop","Gain","Status"]
+                [
+                    "Ativo",
+                    "Preço",
+                    "Probabilidade %",
+                    "Stop",
+                    "Gain",
+                    "Status"
+                ]
             ].sort_values(
-                by="Score",
+                by="Probabilidade %",
                 ascending=False
+            )
+
+            st.success(
+                f"{len(tabela)} oportunidades encontradas."
             )
 
             st.dataframe(
@@ -294,25 +316,31 @@ if modo == "Scanner Top 30":
             )
 
 # =====================================================
-# MODO INDIVIDUAL
+# INDIVIDUAL
 # =====================================================
 
 else:
+
     st.title("🏹 Análise Individual")
 
-    ativo = st.text_input("Digite o ticker:", "PETR4").upper()
+    ativo = st.text_input(
+        "Digite qualquer ticker da B3:",
+        "PETR4"
+    ).upper().replace(".SA","")
 
-    if st.button("🔎 Analisar", use_container_width=True):
+    if st.button("🔎 ANALISAR", use_container_width=True):
 
         r = analisar_ativo(ativo)
 
         if r is None:
             st.error("Ativo inválido ou sem dados.")
+
         else:
+
             c1,c2,c3,c4 = st.columns(4)
 
             c1.metric("Preço", f"R$ {r['Preço']}")
-            c2.metric("Score", r["Score"])
+            c2.metric("Probabilidade", f"{r['Probabilidade %']}%")
             c3.metric("Stop", f"R$ {r['Stop']}")
             c4.metric("Gain", f"R$ {r['Gain']}")
 
@@ -332,5 +360,5 @@ else:
 
 st.markdown("---")
 st.caption(
-    f"Modo Segurança | Atualizado {time.strftime('%d/%m/%Y %H:%M:%S')}"
+    f"Atualizado em {time.strftime('%d/%m/%Y %H:%M:%S')} | Perfil Segurança"
 )
