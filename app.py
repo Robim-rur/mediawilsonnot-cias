@@ -1,21 +1,18 @@
 # =====================================================
-# BUY SIDE TERMINAL V4 ELITE - STATISTICAL FIX CORE
+# BUY SIDE TERMINAL V4 ELITE - STAT FIX + MARKET VIEW
 # =====================================================
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import math
-import time
 
 # =====================================================
 # CONFIG
 # =====================================================
 
 st.set_page_config(
-    page_title="V4 ELITE STAT FIX",
-    page_icon="🏹",
+    page_title="V4 ELITE STAT FIX PRO",
     layout="wide"
 )
 
@@ -30,7 +27,7 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏹 V4 ELITE STATISTICAL ENGINE")
+    st.title("🏹 V4 ELITE PRO")
 
     senha = st.text_input("Senha:", type="password")
 
@@ -44,7 +41,7 @@ if not st.session_state.logado:
     st.stop()
 
 # =====================================================
-# UNIVERSO (mantido)
+# UNIVERSO
 # =====================================================
 
 ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
@@ -70,13 +67,13 @@ ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "C2OL34"]
 
 # =====================================================
-# SAFE DATA ENGINE
+# SAFE
 # =====================================================
 
-def safe(s):
-    s = np.array(s, dtype=float).reshape(-1)
-    s = s[~np.isnan(s)]
-    return s if len(s) > 5 else None
+def safe(x):
+    x = np.array(x, dtype=float).reshape(-1)
+    x = x[~np.isnan(x)]
+    return x if len(x) > 5 else None
 
 # =====================================================
 # EMA
@@ -86,46 +83,40 @@ def ema(s, n):
     s = safe(s)
     if s is None:
         return np.zeros(10)
-    return pd.Series(s).ewm(span=n, adjust=False).mean().values
+    return pd.Series(s).ewm(span=n).mean().values
 
 # =====================================================
-# RETURNS / VOLATILITY
+# REGIME DE MERCADO (RESTAURADO)
 # =====================================================
 
-def returns(s):
-    s = safe(s)
-    if s is None or len(s) < 2:
-        return None
-    return np.diff(s) / s[:-1]
-
-# =====================================================
-# SCORE BASE (RAW EDGE SIGNAL)
-# =====================================================
-
-def raw_score(close, volume):
+def regime(close):
 
     ema21 = ema(close, 21)
-    ema72 = ema(close, 72)
 
-    trend = close[-1] > ema21[-1] > ema72[-1]
-    mom = close[-1] / close[-5] - 1
+    slope = ema21[-1] - ema21[-5] if len(ema21) > 5 else 0
 
-    vol_ok = volume[-1] > np.mean(volume[-20:])
+    vol = np.std(np.diff(close)/close[:-1])
 
-    score = 0
-    score += 1 if trend else 0
-    score += mom * 5
-    score += 1 if vol_ok else 0
+    rng = (np.max(close[-20:]) - np.min(close[-20:])) / close[-1]
 
-    return score
+    if slope > 0 and vol < 0.02:
+        return "TREND"
+
+    if rng < 0.02:
+        return "LATERAL"
+
+    if vol > 0.03:
+        return "VOLATILE"
+
+    return "NEUTRO"
 
 # =====================================================
-# ANALISADOR
+# ANALISE
 # =====================================================
 
-def analisar(ticker):
+def analisar(t):
 
-    df = yf.download(ticker + ".SA", period="300d", interval="1d",
+    df = yf.download(t+".SA", period="300d", interval="1d",
                      auto_adjust=True, progress=False)
 
     if df is None or df.empty:
@@ -139,50 +130,53 @@ def analisar(ticker):
 
     preco = close[-1]
 
-    score = raw_score(close, volume)
+    ema21 = ema(close, 21)
+    ema72 = ema(close, 72)
 
-    vol = returns(close)
-    vol = np.std(vol) if vol is not None else 0.01
+    trend = preco > ema21[-1] > ema72[-1]
+    mom = preco / close[-5] - 1
+
+    score = 0
+    if trend: score += 1
+    score += mom * 5
+
+    vol = np.std(np.diff(close)/close[:-1])
 
     return {
-        "Ativo": ticker,
+        "Ativo": t,
         "Preço": preco,
         "score": score,
-        "vol": vol
+        "vol": vol,
+        "regime": regime(close)
     }
 
 # =====================================================
-# SCANNER (CRÍTICO: NORMALIZAÇÃO CROSS SECTIONAL)
+# SCANNER
 # =====================================================
 
-st.title("🏹 V4 ELITE STATISTICAL FIX")
+st.title("🏹 V4 ELITE PRO - MARKET VIEW")
 
-if st.button("ESCANEAR MERCADO"):
+if st.button("ESCANEAR"):
 
-    resultados = []
+    data = []
 
     for t in ATIVOS:
         r = analisar(t)
         if r:
-            resultados.append(r)
+            data.append(r)
 
-    df = pd.DataFrame(resultados)
+    df = pd.DataFrame(data)
 
     # =================================================
-    # 🔥 NORMALIZAÇÃO REAL (REMOVE PROBLEMA PRINCIPAL)
+    # NORMALIZAÇÃO
     # =================================================
 
     df["z"] = (df["score"] - df["score"].mean()) / (df["score"].std() + 1e-9)
 
-    # =================================================
-    # PROBABILIDADE REAL (SEM SATURAÇÃO)
-    # =================================================
-
-    df["prob"] = 1 / (1 + np.exp(-df["z"] * 0.9))
-    df["prob"] = df["prob"] * 100
+    df["prob"] = 1 / (1 + np.exp(-df["z"] * 0.9)) * 100
 
     # =================================================
-    # EDGE DINÂMICO REAL (SEM FIXO)
+    # EDGE DINÂMICO
     # =================================================
 
     df["gain"] = df["vol"] * 2.5
@@ -191,9 +185,32 @@ if st.button("ESCANEAR MERCADO"):
     df["edge"] = (df["prob"]/100 * df["gain"]) - ((1 - df["prob"]/100) * df["stop"])
 
     # =================================================
-    # RANKING FINAL
+    # RANKING FINAL (NOVO)
     # =================================================
 
-    df = df.sort_values("edge", ascending=False)
+    df["rank_score"] = 0.6 * df["edge"] + 0.4 * df["prob"]
 
-    st.dataframe(df[["Ativo","Preço","prob","edge"]], use_container_width=True)
+    df = df.sort_values("rank_score", ascending=False)
+
+    # =================================================
+    # OUTPUT
+    # =================================================
+
+    st.subheader("🏆 TOP TRADES")
+
+    st.dataframe(
+        df[["Ativo","Preço","prob","edge","regime"]],
+        use_container_width=True
+    )
+
+    # =================================================
+    # DISTRIBUIÇÃO DE MERCADO (BARRAS RESTAURADAS)
+    # =================================================
+
+    st.subheader("📊 REGIME DE MERCADO")
+
+    st.bar_chart(df["regime"].value_counts())
+
+    st.subheader("📊 PROBABILIDADE DISTRIBUIÇÃO")
+
+    st.bar_chart(df["prob"])
