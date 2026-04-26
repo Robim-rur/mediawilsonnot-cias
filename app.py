@@ -1,7 +1,7 @@
 # app.py
-# BUY SIDE TERMINAL MASTER V2
-# Login + Scanner 178 Ativos + Ativo Específico
-# Probabilidade Real Corrigida
+# BUY SIDE TERMINAL V3 ELITE
+# Login + Scanner + Ichimoku + Anti-Esticado + Score Real
+# Arquivo completo pronto para colar
 
 import streamlit as st
 import yfinance as yf
@@ -10,21 +10,21 @@ import numpy as np
 import math
 import time
 
-# ==========================================================
+# =====================================================
 # CONFIG
-# ==========================================================
+# =====================================================
 
 st.set_page_config(
-    page_title="Buy Side Terminal MASTER V2",
+    page_title="BUY SIDE TERMINAL V3 ELITE",
     page_icon="🏹",
     layout="wide"
 )
 
-SENHA_CORRETA = "LUCRO5"
+SENHA = "LUCRO5"
 
-# ==========================================================
-# ESTILO
-# ==========================================================
+# =====================================================
+# CSS
+# =====================================================
 
 st.markdown("""
 <style>
@@ -35,7 +35,7 @@ st.markdown("""
 }
 .stButton button {
     width:100%;
-    height:45px;
+    height:44px;
     border-radius:10px;
 }
 .stMetric {
@@ -47,22 +47,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ==========================================================
+# =====================================================
 # LOGIN
-# ==========================================================
+# =====================================================
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
 
-    st.title("🏹 Buy Side Terminal MASTER")
+    st.title("🏹 BUY SIDE TERMINAL V3 ELITE")
     st.subheader("Área Restrita")
 
-    senha = st.text_input("Digite sua senha:", type="password")
+    senha_input = st.text_input("Digite a senha:", type="password")
 
     if st.button("🔐 ENTRAR"):
-        if senha == SENHA_CORRETA:
+        if senha_input == SENHA:
             st.session_state.logado = True
             st.rerun()
         else:
@@ -70,9 +70,9 @@ if not st.session_state.logado:
 
     st.stop()
 
-# ==========================================================
+# =====================================================
 # LISTA DE ATIVOS
-# ==========================================================
+# =====================================================
 
 ATIVOS = [
 "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
@@ -81,14 +81,14 @@ ATIVOS = [
 "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
 "JBSS3","BEEF3","MRFG3","BRFS3","SLCE3","SMTO3","B3SA3","BBSE3",
 "BPAC11","SANB11","ITSA4","BRSR6","CXSE3","POMO4","STBP3","TUPY3",
-"LEVE3","DIRR3","CYRE3","EZTC3","JHSF3","KEPL3","POSI3","MOVI3",
-"PETZ3","COGN3","YDUQ3","MGLU3","NTCO3","AZUL4","GOLL4","CVCB3",
-"RRRP3","RECV3","ENAT3","ORVR3","AURE3","GMAT3","ENEV3","UGPA3",
+"DIRR3","CYRE3","EZTC3","JHSF3","KEPL3","POSI3","MOVI3","PETZ3",
+"COGN3","YDUQ3","MGLU3","NTCO3","AZUL4","GOLL4","CVCB3","RRRP3",
+"RECV3","ENAT3","ORVR3","AURE3","ENEV3","UGPA3",
 
-"BOVA11","SMAL11","IVVB11","HASH11","GOLD11","DIVO11","NDIV11",
+"BOVA11","IVVB11","SMAL11","HASH11","GOLD11","DIVO11","NDIV11",
 
 "HGLG11","XPLG11","VISC11","MXRF11","KNRI11","KNCR11","KNIP11",
-"CPTS11","IRDM11","TRXF11","TGAR11","HGRU11","RBRR11","ALZR11",
+"CPTS11","IRDM11","TRXF11","TGAR11","HGRU11","ALZR11",
 
 "AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34","NFLX34",
 "NVDC34","MELI34","BABA34","DISB34","PYPL34","JNJB34","VISA34",
@@ -100,16 +100,17 @@ ATIVOS = [
 
 ATIVOS = list(dict.fromkeys(ATIVOS))
 
-# ==========================================================
+# =====================================================
 # FUNÇÕES
-# ==========================================================
+# =====================================================
 
 @st.cache_data(ttl=900)
 def baixar_dados(ticker):
+
     try:
         df = yf.download(
             ticker + ".SA",
-            period="180d",
+            period="260d",
             interval="1d",
             auto_adjust=True,
             progress=False
@@ -129,7 +130,7 @@ def baixar_dados(ticker):
 
         df = df.ffill().dropna()
 
-        if len(df) < 80:
+        if len(df) < 120:
             return None
 
         return df
@@ -138,8 +139,8 @@ def baixar_dados(ticker):
         return None
 
 
-def ema(series, p):
-    return series.ewm(span=p, adjust=False).mean()
+def ema(series, n):
+    return series.ewm(span=n, adjust=False).mean()
 
 
 def wilson_score(pos, total):
@@ -148,16 +149,15 @@ def wilson_score(pos, total):
 
     z = 1.96
     phat = pos / total
-
-    den = 1 + z**2 / total
+    den = 1 + z**2/total
     num = phat + z**2/(2*total) - z * math.sqrt(
-        (phat*(1-phat) + z**2/(4*total))/total
+        (phat*(1-phat)+z**2/(4*total))/total
     )
-
-    return max(0, num / den)
+    return max(0, num/den)
 
 
 def calc_obv(close, volume):
+
     obv = np.zeros(len(close))
 
     for i in range(1, len(close)):
@@ -169,6 +169,25 @@ def calc_obv(close, volume):
             obv[i] = obv[i-1]
 
     return obv
+
+
+def ichimoku(df):
+
+    high9 = df["High"].rolling(9).max()
+    low9 = df["Low"].rolling(9).min()
+    tenkan = (high9 + low9) / 2
+
+    high26 = df["High"].rolling(26).max()
+    low26 = df["Low"].rolling(26).min()
+    kijun = (high26 + low26) / 2
+
+    span_a = ((tenkan + kijun) / 2).shift(26)
+
+    high52 = df["High"].rolling(52).max()
+    low52 = df["Low"].rolling(52).min()
+    span_b = ((high52 + low52) / 2).shift(26)
+
+    return tenkan, kijun, span_a, span_b
 
 
 def analisar_ativo(ticker):
@@ -188,67 +207,124 @@ def analisar_ativo(ticker):
 
     obv = calc_obv(close, volume)
 
-    # ===============================
-    # SCORE REAL
-    # ===============================
+    tenkan, kijun, span_a, span_b = ichimoku(df)
 
     score = 0
 
-    # Tendência
-    dist21 = ((preco / ema21[-1]) - 1) * 100
-    dist72 = ((preco / ema72[-1]) - 1) * 100
+    # ==================================
+    # TENDÊNCIA
+    # ==================================
 
-    score += max(0, min(dist21 * 4, 18))
-    score += max(0, min(dist72 * 2, 12))
+    if preco > ema21[-1]:
+        score += 12
 
-    # Momentum
+    if ema21[-1] > ema72[-1]:
+        score += 12
+
+    slope = ema21[-1] - ema21[-5]
+    if slope > 0:
+        score += 10
+
+    # ==================================
+    # MOMENTUM
+    # ==================================
+
     ret5 = ((preco / close[-6]) - 1) * 100
     ret10 = ((preco / close[-11]) - 1) * 100
 
-    score += max(0, min(ret5 * 3, 15))
-    score += max(0, min(ret10 * 1.5, 10))
+    if ret5 > 0:
+        score += min(ret5 * 2, 10)
 
-    # OBV
-    media_obv = np.mean(obv[-10:])
-    if obv[-1] > media_obv:
-        score += 12
+    if ret10 > 0:
+        score += min(ret10, 8)
 
-    # Volume
-    vol_media = np.mean(volume[-20:])
-    if volume[-1] > vol_media:
+    # ==================================
+    # ANTI ESTICADO
+    # ==================================
+
+    dist_ema = ((preco / ema21[-1]) - 1) * 100
+
+    if dist_ema > 8:
+        score -= 18
+    elif dist_ema > 6:
+        score -= 10
+    elif dist_ema > 4:
+        score -= 5
+
+    # ==================================
+    # VOLUME / FLUXO
+    # ==================================
+
+    media_vol = np.mean(volume[-20:])
+
+    if volume[-1] > media_vol:
         score += 10
 
-    # Volatilidade
-    retornos = pd.Series(close).pct_change().dropna()
-    vol = retornos[-20:].std() * 100
+    if obv[-1] > np.mean(obv[-10:]):
+        score += 10
+
+    # ==================================
+    # ICHIMOKU
+    # ==================================
+
+    sa = float(span_a.iloc[-1]) if pd.notna(span_a.iloc[-1]) else np.nan
+    sb = float(span_b.iloc[-1]) if pd.notna(span_b.iloc[-1]) else np.nan
+    tk = float(tenkan.iloc[-1]) if pd.notna(tenkan.iloc[-1]) else np.nan
+    kj = float(kijun.iloc[-1]) if pd.notna(kijun.iloc[-1]) else np.nan
+
+    if not np.isnan(sa) and not np.isnan(sb):
+
+        topo = max(sa, sb)
+        base = min(sa, sb)
+
+        if preco > topo:
+            score += 14
+
+        if tk > kj:
+            score += 8
+
+        if sa > sb:
+            score += 8
+
+        # se muito longe da nuvem = esticado
+        dist_nuvem = ((preco / topo) - 1) * 100
+
+        if dist_nuvem > 8:
+            score -= 10
+
+    # ==================================
+    # VOLATILIDADE
+    # ==================================
+
+    vol = pd.Series(close).pct_change().dropna().tail(20).std() * 100
 
     if vol > 4:
         score -= min((vol - 4) * 2, 10)
 
-    # ===============================
+    # ==================================
     # WILSON
-    # ===============================
+    # ==================================
 
-    c1 = preco > ema21[-1]
-    c2 = ema21[-1] > ema72[-1]
-    c3 = ret5 > 0
-    c4 = ret10 > 0
-    c5 = obv[-1] > obv[-5]
-    c6 = volume[-1] > vol_media
+    checks = [
+        preco > ema21[-1],
+        ema21[-1] > ema72[-1],
+        ret5 > 0,
+        volume[-1] > media_vol,
+        obv[-1] > obv[-5],
+        tk > kj if not np.isnan(tk) else False,
+        preco > sa if not np.isnan(sa) else False
+    ]
 
-    positivos = sum([c1,c2,c3,c4,c5,c6])
+    positivos = sum(checks)
 
-    wil = wilson_score(positivos, 6) * 100
+    wil = wilson_score(positivos, len(checks)) * 100
 
-    # Final
     prob = (score * 0.62) + (wil * 0.38)
     prob = max(1, min(prob, 99))
 
-    # Stops
     stop = preco * 0.965
     gain = preco * 1.05
 
-    # Status
     if prob >= 85:
         status = "🟢 PREMIUM"
     elif prob >= 78:
@@ -272,9 +348,9 @@ def analisar_ativo(ticker):
         "ema72": ema72
     }
 
-# ==========================================================
-# MENU
-# ==========================================================
+# =====================================================
+# SIDEBAR
+# =====================================================
 
 with st.sidebar:
 
@@ -285,13 +361,13 @@ with st.sidebar:
         ["Scanner Inteligente", "Ativo Específico"]
     )
 
-# ==========================================================
+# =====================================================
 # SCANNER
-# ==========================================================
+# =====================================================
 
 if modo == "Scanner Inteligente":
 
-    st.title("🏹 Scanner Inteligente")
+    st.title("🏹 Scanner Inteligente V3 ELITE")
 
     if st.button("🚀 ESCANEAR MERCADO"):
 
@@ -311,7 +387,7 @@ if modo == "Scanner Inteligente":
             barra.progress((i+1)/total)
 
         if len(resultados) == 0:
-            st.warning("Nenhuma oportunidade encontrada.")
+            st.warning("Nenhum ativo acima de 70% hoje.")
 
         else:
 
@@ -326,7 +402,7 @@ if modo == "Scanner Inteligente":
                 ascending=False
             )
 
-            st.success(f"{len(tabela)} ativos aprovados.")
+            st.success(f"{len(tabela)} oportunidades encontradas.")
 
             st.dataframe(
                 tabela,
@@ -334,13 +410,13 @@ if modo == "Scanner Inteligente":
                 hide_index=True
             )
 
-# ==========================================================
+# =====================================================
 # INDIVIDUAL
-# ==========================================================
+# =====================================================
 
 else:
 
-    st.title("🏹 Ativo Específico")
+    st.title("🏹 Análise Individual")
 
     ticker = st.text_input(
         "Digite o ticker:",
@@ -372,11 +448,11 @@ else:
 
             st.line_chart(graf)
 
-# ==========================================================
+# =====================================================
 # RODAPÉ
-# ==========================================================
+# =====================================================
 
 st.markdown("---")
 st.caption(
-    f"Buy Side MASTER V2 | {time.strftime('%d/%m/%Y %H:%M:%S')}"
+    f"BUY SIDE TERMINAL V3 ELITE | {time.strftime('%d/%m/%Y %H:%M:%S')}"
 )
