@@ -1,6 +1,5 @@
 streamlit
 yfinance
 pandas
-textblob
+requests
 vaderSentiment
-curl_cffi
