@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import math
+import time
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # =====================================================
@@ -10,244 +11,354 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 # =====================================================
 
 st.set_page_config(
-    page_title="BUY SIDE TERMINAL V4.1 FULL",
+    page_title="Buy Side Terminal PRO",
     page_icon="🏹",
     layout="wide"
 )
 
-SENHA = "LUCRO5"
-
 # =====================================================
-# LOGIN
+# ESTILO
 # =====================================================
 
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-if not st.session_state.logado:
-    st.title("🏹 BUY SIDE TERMINAL V4.1 FULL")
-
-    senha = st.text_input("Senha:", type="password")
-
-    if st.button("ENTRAR"):
-        if senha == SENHA:
-            st.session_state.logado = True
-            st.rerun()
-        else:
-            st.error("Senha incorreta")
-
-    st.stop()
+st.markdown("""
+<style>
+.main {background-color:#0e1117;}
+.stMetric {
+    background:#161b22;
+    padding:14px;
+    border-radius:10px;
+    border:1px solid #30363d;
+}
+div[data-testid="stDataFrame"] {
+    border:1px solid #30363d;
+    border-radius:10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =====================================================
-# LISTA COMPLETA (SUA LISTA RESTAURADA)
+# UNIVERSO TOP 30
 # =====================================================
 
 ATIVOS = [
-"RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4","B3SA3","BBAS3","BBDC3",
-"BBDC4","BBSE3","BEEF3","BPAC11","BRAP4","BRFS3","BRKM5","CCRO3","CMIG4","CMIN3",
-"COGN3","CPFE3","CPLE6","CRFB3","CSAN3","CSNA3","CYRE3","DXCO3","EGIE3","ELET3",
-"ELET6","EMBR3","ENEV3","ENGI11","EQTL3","EZTC3","FLRY3","GGBR4","GOAU4","GOLL4",
-"HAPV3","HYPE3","ITSA4","ITUB4","JBSS3","KLBN11","LREN3","LWSA3","MGLU3","MRFG3",
-"MRVE3","MULT3","NTCO3","PETR3","PETR4","PRIO3","RADL3","RAIL3","RAIZ4","RENT3",
-"RECV3","SANB11","SBSP3","SLCE3","SMTO3","SUZB3","TAEE11","TIMS3","TTEN3","TOTS3",
-"TRPL4","UGPA3","USIM5","VALE3","VIVT3","VIVA3","WEGE3","YDUQ3","AURE3","BHIA3",
-"CASH3","CVCB3","DIRR3","ENAT3","GMAT3","IFCM3","INTB3","JHSF3","KEPL3","MOVI3",
-"ORVR3","PETZ3","PLAS3","POMO4","POSI3","RANI3","RAPT4","STBP3","TEND3","TUPY3",
-"BRSR6","CXSE3","AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34","NFLX34",
-"NVDC34","MELI34","BABA34","DISB34","PYPL34","JNJB34","PGCO34","KOCH34","VISA34",
-"WMTB34","NIKE34","ADBE34","AVGO34","CSCO34","COST34","CVSH34","GECO34","GSGI34",
-"HDCO34","INTC34","JPMC34","MAEL34","MCDP34","MDLZ34","MRCK34","ORCL34","PEP334",
-"PFIZ34","PMIC34","QCOM34","SBUX34","TGTB34","TMOS34","TXN34","UNHH34","UPSB34",
-"VZUA34","ABTT34","AMGN34","AXPB34","BAOO34","CATP34","C2OL34","HONB34","BOVA11",
-"IVVB11","SMAL11","HASH11","GOLD11","GARE11","HGLG11","XPLG11","VILG11","BRCO11",
-"BTLG11","XPML11","VISC11","HSML11","MALL11","KNRI11","JSRE11","PVBI11","HGRE11",
-"MXRF11","KNCR11","KNIP11","CPTS11","IRDM11","DIVO11","NDIV11","SPUB11"
+"RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
+"B3SA3","BBAS3","BBDC3","BBDC4","BBSE3","BEEF3","BPAC11",
+"BRAP4","BRFS3","BRKM5","CCRO3","CMIG4","CMIN3","COGN3",
+"CPFE3","CPLE6","CRFB3","CSAN3","CSNA3","CYRE3","DXCO3",
+"EGIE3","ELET3","ELET6","EMBR3","ENEV3","ENGI11","EQTL3",
+"EZTC3","FLRY3","GGBR4","GOAU4","GOLL4","HAPV3","HYPE3",
+"ITSA4","ITUB4","JBSS3","KLBN11","LREN3","LWSA3","MGLU3",
+"MRFG3","MRVE3","MULT3","NTCO3","PETR3","PETR4","PRIO3",
+"RADL3","RAIL3","RAIZ4","RENT3","RECV3","SANB11","SBSP3",
+"SLCE3","SMTO3","SUZB3","TAEE11","TIMS3","TTEN3","TOTS3",
+"TRPL4","UGPA3","USIM5","VALE3","VIVT3","VIVA3","WEGE3",
+"YDUQ3","AURE3","BHIA3","CASH3","CVCB3","DIRR3","ENAT3",
+"GMAT3","IFCM3","INTB3","JHSF3","KEPL3","MOVI3","ORVR3",
+"PETZ3","PLAS3","POMO4","POSI3","RANI3","RAPT4","STBP3",
+"TEND3","TUPY3","BRSR6","CXSE3",
+
+"AAPL34","AMZO34","GOGL34","MSFT34","TSLA34","META34",
+"NFLX34","NVDC34","MELI34","BABA34","DISB34","PYPL34",
+"JNJB34","PGCO34","KOCH34","VISA34","WMTB34","NIKE34",
+"ADBE34","AVGO34","CSCO34","COST34","CVSH34","GECO34",
+"GSGI34","HDCO34","INTC34","JPMC34","MAEL34","MCDP34",
+"MDLZ34","MRCK34","ORCL34","PEP334","PFIZ34","PMIC34",
+"QCOM34","SBUX34","TGTB34","TMOS34","TXN34","UNHH34",
+"UPSB34","VZUA34","ABTT34","AMGN34","AXPB34","BAOO34",
+"C2OL34","HONB34","BICE34","BERK34","GOGL35",
+
+"BOVA11","IVVB11","SMAL11","HASH11","GOLD11","DIVO11",
+"NDIV11","SPUB11",
+
+"GARE11","HGLG11","XPLG11","VILG11","BRCO11","BTLG11",
+"XPML11","VISC11","HSML11","MALL11","KNRI11","JSRE11",
+"PVBI11","HGRE11","MXRF11","KNCR11","KNIP11","CPTS11",
+"IRDM11","TGAR11","TRXF11","HGRU11","ALZR11","XPCA11",
+"VGIA11","RBRR11","KNSC11","CACR11","HABT11","DEVA11",
+"HGCR11","MCCI11","RECR11","VRTA11","BCFF11","HFOF11",
+"XPSF11","RBRP11","RBRF11","URIT11","RZTR11","RURA11",
+"VGIR11","CVBI11"
 ]
 
 # =====================================================
-# DADOS
+# FUNÇÕES
 # =====================================================
 
+def wilson_score(pos, total):
+    if total == 0:
+        return 0
+    z = 1.96
+    phat = pos / total
+    den = 1 + z**2 / total
+    num = phat + z**2/(2*total) - z * math.sqrt(
+        (phat*(1-phat)+z**2/(4*total))/total
+    )
+    return max(0, num / den)
+
 @st.cache_data(ttl=600)
-def get_data(t):
-    df = yf.download(t + ".SA", period="300d", interval="1d", auto_adjust=True, progress=False)
+def baixar_dados(ticker):
+    tk = ticker + ".SA"
+
+    df = yf.download(
+        tk,
+        period="180d",
+        interval="1d",
+        progress=False,
+        auto_adjust=True
+    )
 
     if df.empty:
         return None
 
-    df = df.ffill().bfill()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    cols = ['Open','High','Low','Close','Volume']
+    df = df[cols]
+
+    for c in cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    df = df.ffill().dropna()
+
+    if len(df) < 80:
+        return None
+
     return df
 
-def ema(s,n):
-    return s.ewm(span=n, adjust=False).mean()
+def ema(series, n):
+    return series.ewm(span=n, adjust=False).mean()
 
-def atr(df):
-    h,l,c = df["High"],df["Low"],df["Close"]
-    tr = pd.concat([h-l, abs(h-c.shift(1)), abs(l-c.shift(1))], axis=1).max(axis=1)
-    return tr.rolling(14).mean()
-
-def obv(c,v):
-    o = np.zeros(len(c))
-    for i in range(1,len(c)):
-        if c[i] > c[i-1]:
-            o[i] = o[i-1] + v[i]
-        elif c[i] < c[i-1]:
-            o[i] = o[i-1] - v[i]
+def calc_obv(close, volume):
+    obv = np.zeros(len(close))
+    for i in range(1, len(close)):
+        if close[i] > close[i-1]:
+            obv[i] = obv[i-1] + volume[i]
+        elif close[i] < close[i-1]:
+            obv[i] = obv[i-1] - volume[i]
         else:
-            o[i] = o[i-1]
-    return o
+            obv[i] = obv[i-1]
+    return obv
 
-def wilson(x,n):
-    if n == 0:
+def calc_dmi(df, n=14):
+    high = df['High']
+    low = df['Low']
+    close = df['Close']
+
+    plus_dm = high.diff()
+    minus_dm = low.diff() * -1
+
+    plus_dm = np.where(
+        (plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0
+    )
+    minus_dm = np.where(
+        (minus_dm > plus_dm) & (minus_dm > 0), minus_dm, 0
+    )
+
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(n).mean()
+
+    plus_di = 100 * (pd.Series(plus_dm).rolling(n).mean() / atr)
+    minus_di = 100 * (pd.Series(minus_dm).rolling(n).mean() / atr)
+
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    adx = dx.rolling(n).mean()
+
+    return plus_di.values, minus_di.values, adx.values
+
+def sentimento_score(ticker):
+    try:
+        obj = yf.Ticker(ticker + ".SA")
+        noticias = getattr(obj, "news", [])
+
+        analyzer = SentimentIntensityAnalyzer()
+
+        titulos = []
+
+        for n in noticias[:10]:
+            t = n.get("title")
+            if t:
+                titulos.append(t)
+
+        if len(titulos) == 0:
+            return 0
+
+        vals = []
+
+        for t in titulos:
+            vals.append(
+                analyzer.polarity_scores(t)["compound"]
+            )
+
+        return float(np.mean(vals))
+
+    except:
         return 0
-    z = 1.96
-    ph = x/n
-    return (ph + z*z/(2*n)) / (1 + z*z/n)
 
 # =====================================================
-# MOTOR V4.1 FULL
+# MOTOR
 # =====================================================
 
-def analisar(t):
+def analisar_ativo(ticker):
+    df = baixar_dados(ticker)
 
-    df = get_data(t)
     if df is None:
         return None
 
-    close = df["Close"].values
-    vol = df["Volume"].values
-    price = float(close[-1])
+    close = df['Close'].values
+    volume = df['Volume'].values
+    preco = float(close[-1])
 
-    ema21 = ema(df["Close"],21).values
-    ema72 = ema(df["Close"],72).values
+    ema21 = ema(df['Close'], 21).values
+    ema72 = ema(df['Close'], 72).values
 
-    atr_v = float(atr(df).iloc[-1])
+    obv = calc_obv(close, volume)
+    plus_di, minus_di, adx = calc_dmi(df)
+    sent = sentimento_score(ticker)
 
-    ob = obv(close, vol)
+    score = 0
 
-    # =========================
-    # SENTIMENTO
-    # =========================
+    c1 = preco > ema21[-1] > ema72[-1]
+    if c1: score += 30
 
-    try:
-        analyzer = SentimentIntensityAnalyzer()
-        news = yf.Ticker(t+".SA").news
+    c2 = adx[-1] > 20 if not np.isnan(adx[-1]) else False
+    if c2: score += 18
 
-        titles = [n["title"] for n in news[:10] if "title" in n]
+    c3 = plus_di[-1] > minus_di[-1] if not np.isnan(plus_di[-1]) else False
+    if c3: score += 15
 
-        if len(titles) > 0:
-            sentiment = np.mean([analyzer.polarity_scores(x)["compound"] for x in titles])
-        else:
-            sentiment = 0
-    except:
-        sentiment = 0
+    c4 = obv[-1] > np.mean(obv[-10:])
+    if c4: score += 15
 
-    # =========================
-    # SCORE
-    # =========================
+    c5 = sent > 0
+    if c5: score += 7
 
-    score = 50
+    c6 = close[-1] > close[-3]
+    if c6: score += 15
 
-    if price > ema21[-1]: score += 10
-    if ema21[-1] > ema72[-1]: score += 10
-    if ema21[-1] > ema21[-5]: score += 5
+    positivos = sum([c1,c2,c3,c4,c5,c6])
 
-    ret5 = ((price/close[-6]) - 1)*100
-    if ret5 > 0:
-        score += min(ret5*1.5, 8)
+    wil = wilson_score(positivos, 6) * 100
 
-    if vol[-1] > np.mean(vol[-20:]):
-        score += 7
+    prob = (score * 0.65) + (wil * 0.35)
 
-    if ob[-1] > ob[-5]:
-        score += 5
+    # =====================================================
+    # 🎯 GAIN PROVÁVEL (NOVO)
+    # =====================================================
 
-    if sentiment > 0.1:
-        score += 5
+    forca = prob / 100
+    vol = np.std(close[-20:]) / preco
+    gain_prob = (forca * vol * 2.5) * 100
+    gain_prob = max(0.5, min(gain_prob, 12))
 
-    dist = ((price/ema21[-1]) - 1)*100
-    if dist > 7:
-        score -= 8
+    stop = preco * (1 - 0.035)
+    gain = preco * (1 + 0.05)
 
-    score = max(0,min(score,100))
-
-    # =========================
-    # PROBABILIDADE
-    # =========================
-
-    prob = score * 0.92
-    prob = max(1,min(prob,99))
-
-    # =========================
-    # STOP / GAIN
-    # =========================
-
-    stop_pct = max(2.0, min((atr_v/price)*100*1.25, 6.5))
-    gain_pct = min(stop_pct * (prob/60), 12)
-
-    rr = gain_pct / stop_pct
-
-    # =========================
-    # EV
-    # =========================
-
-    p = prob/100
-    ev = (p * gain_pct) - ((1-p) * stop_pct)
-
-    # =========================
-    # STATUS
-    # =========================
-
-    if ev > 1.5:
-        status = "🟢 MUITO FAVORÁVEL"
-    elif ev > 0.8:
-        status = "🟢 FAVORÁVEL"
-    elif ev > 0:
-        status = "🟡 NEUTRO POSITIVO"
+    if prob >= 85:
+        status = "🟢 PREMIUM"
+    elif prob >= 75:
+        status = "🟢 COMPRA"
+    elif prob >= 70:
+        status = "🟡 BOA"
     else:
-        status = "🔴 EV NEGATIVO"
+        status = "🔴 FORA"
 
     return {
-        "Ativo": t,
-        "Preço": round(price,2),
-        "Prob %": round(prob,1),
-        "Gain %": round(gain_pct,2),
-        "Stop %": round(stop_pct,2),
-        "RR": round(rr,2),
-        "EV": round(ev,2),
-        "Sentimento": round(sentiment,2),
-        "Status": status
+        "Ativo": ticker,
+        "Preço": round(preco,2),
+        "Probabilidade %": round(prob,1),
+        "Gain Provável %": round(gain_prob,2),
+        "Stop": round(stop,2),
+        "Gain": round(gain,2),
+        "Status": status,
+        "df": df,
+        "ema21": ema21,
+        "ema72": ema72
     }
 
 # =====================================================
-# SCANNER
+# RESTANTE DO APP (INALTERADO)
 # =====================================================
 
-st.title("🏹 V4.1 FULL — UNIVERSO COMPLETO")
+with st.sidebar:
+    st.title("🏹 Buy Side PRO")
 
-if st.button("ESCANEAR MERCADO"):
+    modo = st.radio(
+        "Modo:",
+        ["Scanner Inteligente", "Ativo Específico"]
+    )
 
-    res = []
+if modo == "Scanner Inteligente":
 
-    prog = st.progress(0)
+    st.title("🏹 Scanner Inteligente Top 30")
 
-    for i,a in enumerate(ATIVOS):
+    if st.button("🚀 ESCANEAR MERCADO", use_container_width=True):
 
-        r = analisar(a)
+        resultados = []
+        barra = st.progress(0)
 
-        if r and r["Prob %"] >= 65 and r["EV"] > -0.2:
-            res.append(r)
+        for i, ativo in enumerate(ATIVOS):
 
-        prog.progress((i+1)/len(ATIVOS))
+            r = analisar_ativo(ativo)
 
-    if len(res) == 0:
-        st.warning("Nenhuma oportunidade encontrada.")
+            if r and r["Probabilidade %"] >= 70:
+                resultados.append(r)
 
-    else:
+            barra.progress((i+1)/len(ATIVOS))
 
-        df = pd.DataFrame(res)
-        df = df.sort_values(["EV","Prob %"], ascending=False)
+        if len(resultados) == 0:
+            st.warning("Nenhuma oportunidade forte encontrada.")
 
-        st.success(f"{len(df)} ativos encontrados")
+        else:
+            tabela = pd.DataFrame(resultados)
 
-        st.dataframe(df, use_container_width=True)
+            tabela = tabela[
+                [
+                    "Ativo",
+                    "Preço",
+                    "Probabilidade %",
+                    "Gain Provável %",
+                    "Stop",
+                    "Gain",
+                    "Status"
+                ]
+            ].sort_values(
+                by="Probabilidade %",
+                ascending=False
+            )
+
+            st.success(f"{len(tabela)} oportunidades encontradas.")
+
+            st.dataframe(tabela, use_container_width=True, hide_index=True)
+
+else:
+
+    st.title("🏹 Análise Individual")
+
+    ativo = st.text_input("Ticker:", "PETR4").upper().replace(".SA","")
+
+    if st.button("🔎 ANALISAR", use_container_width=True):
+
+        r = analisar_ativo(ativo)
+
+        if r is None:
+            st.error("Ativo inválido")
+
+        else:
+
+            c1,c2,c3,c4 = st.columns(4)
+
+            c1.metric("Preço", f"R$ {r['Preço']}")
+            c2.metric("Probabilidade", f"{r['Probabilidade %']}%")
+            c3.metric("Gain Provável", f"{r['Gain Provável %']}%")
+            c4.metric("Status", r["Status"])
+
+            st.line_chart(pd.DataFrame({
+                "Preço": r["df"]["Close"],
+                "EMA21": r["ema21"],
+                "EMA72": r["ema72"]
+            }))
