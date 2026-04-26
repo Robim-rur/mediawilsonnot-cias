@@ -1,4 +1,4 @@
-# BUY SIDE TERMINAL V4 ELITE HC - INSTITUTIONAL SAFE ENGINE
+# BUY SIDE TERMINAL V4 ELITE HC - EDGE INSTITUCIONAL CALIBRADO
 
 import streamlit as st
 import yfinance as yf
@@ -28,7 +28,7 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏹 V4 ELITE HC - INSTITUTIONAL ENGINE")
+    st.title("🏹 V4 ELITE HC - EDGE INSTITUCIONAL")
 
     senha = st.text_input("Senha:", type="password")
 
@@ -70,77 +70,52 @@ ATIVOS = [
 ]
 
 # =====================================================
-# SAFE ENGINE (CORE)
-# =====================================================
-
-def safe_array(series):
-
-    arr = np.array(series, dtype=float).flatten()
-    arr = arr[~np.isnan(arr)]
-
-    if len(arr) < 5:
-        return None
-
-    return arr
-
-
-def safe_return(close):
-
-    close = safe_array(close)
-
-    if close is None or len(close) < 2:
-        return None
-
-    denom = close[:-1]
-    denom = np.where(denom == 0, np.nan, denom)
-
-    ret = np.diff(close) / denom
-    ret = ret[~np.isnan(ret)]
-
-    if len(ret) == 0:
-        return None
-
-    return ret
-
-
-# =====================================================
-# EMA SAFE
+# UTIL
 # =====================================================
 
 def ema(series, n):
     return pd.Series(series).ewm(span=n, adjust=False).mean().values
 
 # =====================================================
-# REGIME DETECTOR (BLINDADO)
+# SAFE DATA
+# =====================================================
+
+def safe_array(x):
+    x = np.array(x, dtype=float).flatten()
+    x = x[~np.isnan(x)]
+    return x if len(x) > 5 else None
+
+def safe_returns(close):
+    close = safe_array(close)
+    if close is None or len(close) < 2:
+        return None
+
+    denom = np.where(close[:-1] == 0, np.nan, close[:-1])
+    r = np.diff(close) / denom
+    r = r[~np.isnan(r)]
+
+    return r if len(r) > 0 else None
+
+# =====================================================
+# REGIME
 # =====================================================
 
 def detectar_regime(df):
 
     close = safe_array(df["Close"].values)
-
     if close is None:
         return "LATERAL"
 
     ema21 = ema(close, 21)
 
-    if len(close) < 30:
-        return "LATERAL"
-
-    # volatilidade segura
-    ret = safe_return(close[-25:])
-
+    ret = safe_returns(close[-25:])
     vol = np.std(ret) * 100 if ret is not None else 0
 
-    # slope seguro
-    slope = 0
-    if len(ema21) > 5:
-        slope = ema21[-1] - ema21[-5]
+    slope = ema21[-1] - ema21[-5] if len(ema21) > 5 else 0
 
-    # range seguro
-    high = np.max(close[-20:]) if len(close) >= 20 else np.max(close)
-    low = np.min(close[-20:]) if len(close) >= 20 else np.min(close)
-
-    range_pct = ((high - low) / close[-1]) * 100 if close[-1] != 0 else 0
+    high = np.max(close[-20:])
+    low = np.min(close[-20:])
+    range_pct = ((high - low) / close[-1]) * 100
 
     if slope > 0 and vol < 3 and range_pct > 3:
         return "TREND"
@@ -154,7 +129,7 @@ def detectar_regime(df):
     return "LATERAL"
 
 # =====================================================
-# STRATEGY ENGINE
+# STRATEGY WEIGHTS
 # =====================================================
 
 def strategy_weights(regime):
@@ -179,76 +154,90 @@ def strategy_weights(regime):
 
 def analisar(ticker):
 
-    try:
+    df = yf.download(
+        ticker + ".SA",
+        period="300d",
+        interval="1d",
+        auto_adjust=True,
+        progress=False
+    )
 
-        df = yf.download(
-            ticker + ".SA",
-            period="300d",
-            interval="1d",
-            auto_adjust=True,
-            progress=False
-        )
-
-        if df is None or df.empty:
-            return None
-
-        close = safe_array(df["Close"].values)
-        volume = safe_array(df["Volume"].values)
-
-        if close is None or volume is None:
-            return None
-
-        if len(close) < 120:
-            return None
-
-        preco = close[-1]
-
-        ema21 = ema(close, 21)
-        ema72 = ema(close, 72)
-
-        regime = detectar_regime(df)
-        weights = strategy_weights(regime)
-
-        trend = int(preco > ema21[-1] > ema72[-1])
-        volume_sig = int(volume[-1] > np.mean(volume[-20:]))
-        mean_rev = int(preco < ema21[-1])
-
-        ret = safe_return(close[-10:])
-        risk = 1 - np.std(ret) if ret is not None else 0.5
-
-        score = (
-            trend * weights["trend"] +
-            volume_sig * weights["volume"] +
-            mean_rev * weights["mean"] +
-            risk * weights["risk"]
-        )
-
-        prob = 1 / (1 + np.exp(-score * 5))
-        prob = prob * 100
-
-        stop = preco * 0.965
-        gain = preco * 1.05
-
-        edge = (prob/100 * gain) - ((1 - prob/100) * (preco - stop))
-
-        return {
-            "Ativo": ticker,
-            "Preço": round(preco,2),
-            "Prob": round(prob,2),
-            "Regime": regime,
-            "EDGE": round(edge,4),
-            "Stop": round(stop,2),
-            "Gain": round(gain,2)
-        }
-
-    except:
+    if df is None or df.empty:
         return None
+
+    close = safe_array(df["Close"].values)
+    volume = safe_array(df["Volume"].values)
+
+    if close is None or volume is None:
+        return None
+
+    if len(close) < 120:
+        return None
+
+    preco = close[-1]
+
+    ema21 = ema(close, 21)
+    ema72 = ema(close, 72)
+
+    regime = detectar_regime(df)
+    weights = strategy_weights(regime)
+
+    # =========================
+    # SINAIS
+    # =========================
+
+    trend = int(preco > ema21[-1] > ema72[-1])
+    volume_sig = int(volume[-1] > np.mean(volume[-20:]))
+    mean_rev = int(preco < ema21[-1])
+
+    ret = safe_returns(close[-10:])
+    risk = 1 - np.std(ret) if ret is not None else 0.5
+
+    score = (
+        trend * weights["trend"] +
+        volume_sig * weights["volume"] +
+        mean_rev * weights["mean"] +
+        risk * weights["risk"]
+    )
+
+    # =====================================================
+    # PROBABILIDADE (CALIBRADA)
+    # =====================================================
+
+    prob = 1 / (1 + np.exp(-score * 5))
+    prob = prob * 100
+
+    # =====================================================
+    # RETURN MODEL (NORMALIZADO)
+    # =====================================================
+
+    gain_pct = 0.05   # 5% alvo médio adaptado
+    stop_pct = 0.035  # 3.5% risco padrão
+
+    # =====================================================
+    # EDGE INSTITUCIONAL (CORRETO)
+    # =====================================================
+
+    edge = (prob/100 * gain_pct) - ((1 - prob/100) * stop_pct)
+
+    # escala interpretável (%)
+    edge_pct = edge * 100
+
+    return {
+        "Ativo": ticker,
+        "Preço": round(preco,2),
+        "Prob": round(prob,2),
+        "Regime": regime,
+        "EDGE (%)": round(edge_pct,3),
+        "Gain (%)": round(gain_pct*100,2),
+        "Stop (%)": round(stop_pct*100,2)
+    }
 
 # =====================================================
 # SCANNER
 # =====================================================
 
-st.title("🏹 V4 ELITE HC - INSTITUTIONAL ENGINE")
+st.title("🏹 V4 ELITE HC - EDGE INSTITUCIONAL")
 
 if st.button("ESCANEAR MERCADO"):
 
@@ -270,13 +259,11 @@ if st.button("ESCANEAR MERCADO"):
 
     df = pd.DataFrame(resultados)
 
-    df = df.sort_values("EDGE", ascending=False)
+    df = df.sort_values("EDGE (%)", ascending=False)
 
-    top8 = df.head(8)
+    st.subheader("🏆 TOP OPPORTUNITIES")
 
-    st.subheader("🏆 TOP 8 INSTITUTIONAL")
-
-    st.dataframe(top8, use_container_width=True)
+    st.dataframe(df.head(10), use_container_width=True)
 
     st.subheader("📊 REGIMES")
 
