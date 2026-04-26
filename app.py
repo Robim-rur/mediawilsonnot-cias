@@ -1,3 +1,8 @@
+# app.py
+# Buy Side Terminal PRO Safety Mode
+# Scanner Top 30 + Ativo Específico
+# Pronto para Streamlit
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -6,187 +11,326 @@ import math
 import time
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-# ==========================================
-# 1. CONFIGURAÇÕES E ESTILO
-# ==========================================
+# =====================================================
+# CONFIG
+# =====================================================
+
 st.set_page_config(
-    page_title="Buy-Side Terminal | Wilson Score",
+    page_title="Buy Side Terminal PRO",
     page_icon="🏹",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 st.markdown("""
-    <style>
-    .main { background-color: #0e1117; }
-    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.main {background-color:#0e1117;}
+.stMetric {
+    background:#161b22;
+    padding:14px;
+    border-radius:10px;
+    border:1px solid #30363d;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ==========================================
-# 2. MOTORES DE CÁLCULO
-# ==========================================
+# =====================================================
+# UNIVERSO TOP 30 (ações + ETFs)
+# =====================================================
 
-def wilson_score(positivos, total):
-    if total == 0: return 0
-    z = 1.96 
-    phat = positivos / total
-    denominador = 1 + z**2/total
-    numerador = phat + z**2/(2*total) - z * math.sqrt((phat*(1-phat) + z**2/(4*total))/total)
-    return max(0, numerador / denominador)
+ATIVOS = [
+    "PETR4","VALE3","BBAS3","ITUB4","BBDC4","ABEV3",
+    "WEGE3","RENT3","SUZB3","PRIO3","RADL3","LREN3",
+    "JBSS3","GGBR4","CSNA3","CMIG4","ELET3","TAEE11",
+    "B3SA3","EGIE3","VIVT3","MULT3","TIMS3","RAIL3",
+    "BOVA11","SMAL11","IVVB11","DIVO11","XFIX11","HASH11"
+]
 
-def calcular_sar_parabolico(df, af=0.02, max_af=0.2):
-    # Garantir que os dados são arrays simples para evitar erro de Series Ambiguous
-    high = df['High'].values
-    low = df['Low'].values
-    close = df['Close'].values
-    
-    sar = np.copy(close)
-    uptrend = True
-    ep = high[0]
-    sar[0] = low[0]
-    af_current = af
-    
-    for i in range(1, len(close)):
-        sar[i] = sar[i-1] + af_current * (ep - sar[i-1])
-        if uptrend:
-            if low[i] < sar[i]:
-                uptrend = False
-                sar[i] = ep
-                ep = low[i]
-                af_current = af
-            else:
-                if high[i] > ep:
-                    ep = high[i]
-                    af_current = min(af_current + af, max_af)
-        else:
-            if high[i] > sar[i]:
-                uptrend = True
-                sar[i] = ep
-                ep = high[i]
-                af_current = af
-            else:
-                if low[i] < ep:
-                    ep = low[i]
-                    af_current = min(af_current + af, max_af)
-    return sar
+# =====================================================
+# FUNÇÕES
+# =====================================================
 
-# ==========================================
-# 3. GERENCIAMENTO DE CACHE
-# ==========================================
+def wilson_score(pos, total):
+    if total == 0:
+        return 0
+    z = 1.96
+    phat = pos / total
+    den = 1 + z**2 / total
+    num = phat + z**2/(2*total) - z * math.sqrt(
+        (phat*(1-phat)+z**2/(4*total))/total
+    )
+    return max(0, num / den)
 
-@st.cache_resource(ttl=600)
-def obter_ticker_seguro(ticker):
-    return yf.Ticker(ticker)
+@st.cache_data(ttl=600)
+def baixar_dados(ticker):
+    tk = ticker + ".SA"
+    df = yf.download(
+        tk,
+        period="180d",
+        interval="1d",
+        progress=False,
+        auto_adjust=True
+    )
 
-@st.cache_data(ttl=300)
-def buscar_historico_completo(ticker):
-    # Auto_adjust=True ajuda a evitar colunas duplicadas
-    df = yf.download(ticker, period="100d", interval="1d", progress=False, auto_adjust=True)
-    if df.empty: return None
-    # Forçar os nomes das colunas para evitar conflitos de MultiIndex
-    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+    if df.empty:
+        return None
+
+    # Corrigir MultiIndex
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    cols = ['Open','High','Low','Close','Volume']
+    df = df[cols]
+
+    for c in cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
     df = df.ffill().dropna()
+
+    if len(df) < 80:
+        return None
+
     return df
 
-# ==========================================
-# 4. INTERFACE E LÓGICA PRINCIPAL
-# ==========================================
+def ema(series, n):
+    return series.ewm(span=n, adjust=False).mean()
+
+def calc_obv(close, volume):
+    obv = np.zeros(len(close))
+    for i in range(1, len(close)):
+        if close[i] > close[i-1]:
+            obv[i] = obv[i-1] + volume[i]
+        elif close[i] < close[i-1]:
+            obv[i] = obv[i-1] - volume[i]
+        else:
+            obv[i] = obv[i-1]
+    return obv
+
+def calc_dmi(df, n=14):
+    high = df['High']
+    low = df['Low']
+    close = df['Close']
+
+    plus_dm = high.diff()
+    minus_dm = low.diff() * -1
+
+    plus_dm = np.where(
+        (plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0
+    )
+    minus_dm = np.where(
+        (minus_dm > plus_dm) & (minus_dm > 0), minus_dm, 0
+    )
+
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(n).mean()
+
+    plus_di = 100 * (pd.Series(plus_dm).rolling(n).mean() / atr)
+    minus_di = 100 * (pd.Series(minus_dm).rolling(n).mean() / atr)
+
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    adx = dx.rolling(n).mean()
+
+    return plus_di.values, minus_di.values, adx.values
+
+def sentimento_score(ticker):
+    try:
+        obj = yf.Ticker(ticker + ".SA")
+        noticias = getattr(obj, "news", [])
+
+        analyzer = SentimentIntensityAnalyzer()
+
+        titulos = []
+        for n in noticias[:10]:
+            t = n.get("title")
+            if t:
+                titulos.append(t)
+
+        if len(titulos) == 0:
+            return 0
+
+        vals = []
+        for t in titulos:
+            vals.append(analyzer.polarity_scores(t)["compound"])
+
+        return float(np.mean(vals))
+    except:
+        return 0
+
+def analisar_ativo(ticker):
+    df = baixar_dados(ticker)
+    if df is None:
+        return None
+
+    close = df['Close'].values
+    volume = df['Volume'].values
+
+    preco = float(close[-1])
+
+    ema21 = ema(df['Close'], 21).values
+    ema72 = ema(df['Close'], 72).values
+
+    obv = calc_obv(close, volume)
+
+    plus_di, minus_di, adx = calc_dmi(df)
+
+    sent = sentimento_score(ticker)
+
+    # ==========================
+    # SCORE SEGURANÇA
+    # ==========================
+    score = 0
+
+    # Tendência forte
+    c1 = preco > ema21[-1] > ema72[-1]
+    if c1:
+        score += 30
+
+    # Força tendência
+    c2 = adx[-1] > 20 if not np.isnan(adx[-1]) else False
+    if c2:
+        score += 20
+
+    # Compradores dominam
+    c3 = plus_di[-1] > minus_di[-1] if not np.isnan(plus_di[-1]) else False
+    if c3:
+        score += 15
+
+    # Volume
+    c4 = obv[-1] > np.mean(obv[-10:])
+    if c4:
+        score += 15
+
+    # Sentimento
+    c5 = sent > 0
+    if c5:
+        score += 5
+
+    # Momentum curto
+    c6 = close[-1] > close[-3]
+    if c6:
+        score += 15
+
+    # Wilson baseado nos pilares
+    positivos = sum([c1,c2,c3,c4,c5,c6])
+    wil = wilson_score(positivos, 6) * 100
+
+    nota_final = (score * 0.7) + (wil * 0.3)
+
+    stop = preco * (1 - 0.035)
+    alvo = preco * (1 + 0.05)
+
+    if nota_final >= 85:
+        status = "COMPRA FORTE"
+    elif nota_final >= 72:
+        status = "COMPRA"
+    elif nota_final >= 60:
+        status = "OBSERVAÇÃO"
+    else:
+        status = "EVITAR"
+
+    return {
+        "Ativo": ticker,
+        "Preço": round(preco,2),
+        "Score": round(nota_final,1),
+        "Stop": round(stop,2),
+        "Gain": round(alvo,2),
+        "Status": status,
+        "df": df,
+        "ema21": ema21,
+        "ema72": ema72
+    }
+
+# =====================================================
+# SIDEBAR
+# =====================================================
 
 with st.sidebar:
-    st.header("🏹 Terminal Buy-Side")
-    ticker_raw = st.text_input("Ticker B3:", "PETR4").upper()
-    ticker_sa = ticker_raw if ticker_raw.endswith(".SA") else f"{ticker_raw}.SA"
-    
-    st.divider()
-    stop_fixo = st.number_input("Stop Loss Fixo (%)", value=5.0)
-    target_fixo = st.number_input("Gain Alvo (%)", value=8.0)
-    
-    btn_analise = st.button("🚀 EXECUTAR SCANNER", use_container_width=True)
+    st.title("🏹 Buy Side PRO")
 
-if btn_analise:
-    try:
-        with st.spinner(f"Analisando confluências para {ticker_raw}..."):
-            ticker_obj = obter_ticker_seguro(ticker_sa)
-            hist = buscar_historico_completo(ticker_sa)
-            
-            if hist is None:
-                st.error("Erro: Ativo não encontrado ou sem liquidez.")
-            else:
-                # Extração de valores puros para evitar erros de Series/Ambiguous
-                precos = hist['Close'].astype(float).values
-                volumes = hist['Volume'].astype(float).values
-                preco_atual = float(precos[-1])
-                
-                # EMA 21
-                ema21 = hist['Close'].ewm(span=21, adjust=False).mean().values
-                
-                # OBV (Cálculo Otimizado com Numpy para evitar erro iloc)
-                obv_values = np.zeros(len(precos))
-                for i in range(1, len(precos)):
-                    if precos[i] > precos[i-1]:
-                        obv_values[i] = obv_values[i-1] + volumes[i]
-                    elif precos[i] < precos[i-1]:
-                        obv_values[i] = obv_values[i-1] - volumes[i]
-                    else:
-                        obv_values[i] = obv_values[i-1]
-                
-                # SAR
-                sar_values = calcular_sar_parabolico(hist)
-                
-                # Sentimento
-                analyzer = SentimentIntensityAnalyzer()
-                analyzer.lexicon.update({'lucro': 4.0, 'dividendos': 3.5, 'alta': 2.0, 'ebitda': 2.5})
-                
-                noticias = ticker_obj.news
-                titulos = [n['title'] for n in noticias[:12]]
-                scores = [analyzer.polarity_scores(t)['compound'] for t in titulos]
-                score_sent = sum(scores)/len(scores) if scores else 0
-                
-                # VALIDAÇÃO DOS 4 PILARES
-                c1 = bool(preco_atual > ema21[-1])
-                c2 = bool(obv_values[-1] > obv_values[-5])
-                c3 = bool(score_sent > 0.12)
-                c4 = bool(sar_values[-1] < preco_atual)
-                
-                sinais = sum([c1, c2, c3, c4])
-                confianca_wilson = wilson_score(sinais, 4) * 100
-                
-                # OUTPUT
-                st.subheader(f"Resultado da Análise: {ticker_raw}")
-                
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
-                m2.metric("Score Wilson", f"{confianca_wilson:.1f}%")
-                m3.metric("Stop Loss", f"R$ {preco_atual * (1 - stop_fixo/100):.2f}")
-                m4.metric("Gain Alvo", f"R$ {preco_atual * (1 + target_fixo/100):.2f}")
-                
-                st.divider()
-                
-                col_info, col_chart = st.columns([1, 2])
-                with col_info:
-                    st.write("### ✅ Checklist de Compra")
-                    st.write(f"{'🟢' if c1 else '🔴'} Tendência (EMA21)")
-                    st.write(f"{'🟢' if c2 else '🔴'} Volume (OBV)")
-                    st.write(f"{'🟢' if c3 else '🔴'} Mídia (Sentimento)")
-                    st.write(f"{'🟢' if c4 else '🔴'} SAR (Momentum)")
-                    
-                    if confianca_wilson >= 60:
-                        st.success("**SINAL DE COMPRA CONFIRMADO**")
-                    else:
-                        st.warning("**AGUARDAR CONFLUÊNCIA**")
+    modo = st.radio(
+        "Modo:",
+        ["Scanner Top 30", "Ativo Específico"]
+    )
 
-                with col_chart:
-                    df_plot = pd.DataFrame({
-                        'Preço': precos,
-                        'EMA 21': ema21,
-                        'SAR': sar_values
-                    }, index=hist.index)
-                    st.line_chart(df_plot)
+# =====================================================
+# MODO SCANNER
+# =====================================================
 
-    except Exception as e:
-        st.error(f"Erro no processamento do ativo {ticker_raw}.")
-        st.write(f"Detalhe técnico: {e}")
+if modo == "Scanner Top 30":
+
+    st.title("🏹 Scanner Automático Top 30")
+
+    if st.button("🚀 Executar Scanner", use_container_width=True):
+
+        resultados = []
+
+        barra = st.progress(0)
+
+        for i, ativo in enumerate(ATIVOS):
+            r = analisar_ativo(ativo)
+            if r:
+                resultados.append(r)
+
+            barra.progress((i+1)/len(ATIVOS))
+
+        if len(resultados) == 0:
+            st.error("Nenhum ativo processado.")
+        else:
+            tabela = pd.DataFrame(resultados)
+            tabela = tabela[
+                ["Ativo","Preço","Score","Stop","Gain","Status"]
+            ].sort_values(
+                by="Score",
+                ascending=False
+            )
+
+            st.dataframe(
+                tabela,
+                use_container_width=True,
+                hide_index=True
+            )
+
+# =====================================================
+# MODO INDIVIDUAL
+# =====================================================
+
+else:
+    st.title("🏹 Análise Individual")
+
+    ativo = st.text_input("Digite o ticker:", "PETR4").upper()
+
+    if st.button("🔎 Analisar", use_container_width=True):
+
+        r = analisar_ativo(ativo)
+
+        if r is None:
+            st.error("Ativo inválido ou sem dados.")
+        else:
+            c1,c2,c3,c4 = st.columns(4)
+
+            c1.metric("Preço", f"R$ {r['Preço']}")
+            c2.metric("Score", r["Score"])
+            c3.metric("Stop", f"R$ {r['Stop']}")
+            c4.metric("Gain", f"R$ {r['Gain']}")
+
+            st.subheader(r["Status"])
+
+            plot = pd.DataFrame({
+                "Preço": r["df"]["Close"],
+                "EMA21": r["ema21"],
+                "EMA72": r["ema72"]
+            }, index=r["df"].index)
+
+            st.line_chart(plot)
+
+# =====================================================
+# RODAPÉ
+# =====================================================
 
 st.markdown("---")
-st.caption(f"Terminal Buy Side Pro | {time.strftime('%d/%m/%Y %H:%M:%S')}")
+st.caption(
+    f"Modo Segurança | Atualizado {time.strftime('%d/%m/%Y %H:%M:%S')}"
+)
