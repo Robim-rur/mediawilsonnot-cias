@@ -1,7 +1,6 @@
 # app.py
 # BUY SIDE TERMINAL V3 ELITE
-# Login + Scanner + Ichimoku + Anti-Esticado + Score Real
-# Arquivo completo pronto para colar
+# Login + Scanner + Ichimoku + Anti-Esticado + Score Real + EDGE METRICS
 
 import streamlit as st
 import yfinance as yf
@@ -107,36 +106,26 @@ ATIVOS = list(dict.fromkeys(ATIVOS))
 @st.cache_data(ttl=900)
 def baixar_dados(ticker):
 
-    try:
-        df = yf.download(
-            ticker + ".SA",
-            period="260d",
-            interval="1d",
-            auto_adjust=True,
-            progress=False
-        )
+    df = yf.download(
+        ticker + ".SA",
+        period="260d",
+        interval="1d",
+        auto_adjust=True,
+        progress=False
+    )
 
-        if df.empty:
-            return None
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        cols = ["Open","High","Low","Close","Volume"]
-        df = df[cols].copy()
-
-        for c in cols:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-        df = df.ffill().dropna()
-
-        if len(df) < 120:
-            return None
-
-        return df
-
-    except:
+    if df.empty:
         return None
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    cols = ["Open","High","Low","Close","Volume"]
+    df = df[cols].copy()
+
+    df = df.ffill().dropna()
+
+    return df
 
 
 def ema(series, n):
@@ -156,39 +145,9 @@ def wilson_score(pos, total):
     return max(0, num/den)
 
 
-def calc_obv(close, volume):
-
-    obv = np.zeros(len(close))
-
-    for i in range(1, len(close)):
-        if close[i] > close[i-1]:
-            obv[i] = obv[i-1] + volume[i]
-        elif close[i] < close[i-1]:
-            obv[i] = obv[i-1] - volume[i]
-        else:
-            obv[i] = obv[i-1]
-
-    return obv
-
-
-def ichimoku(df):
-
-    high9 = df["High"].rolling(9).max()
-    low9 = df["Low"].rolling(9).min()
-    tenkan = (high9 + low9) / 2
-
-    high26 = df["High"].rolling(26).max()
-    low26 = df["Low"].rolling(26).min()
-    kijun = (high26 + low26) / 2
-
-    span_a = ((tenkan + kijun) / 2).shift(26)
-
-    high52 = df["High"].rolling(52).max()
-    low52 = df["Low"].rolling(52).min()
-    span_b = ((high52 + low52) / 2).shift(26)
-
-    return tenkan, kijun, span_a, span_b
-
+# =====================================================
+# CORE ANALYSIS
+# =====================================================
 
 def analisar_ativo(ticker):
 
@@ -198,6 +157,7 @@ def analisar_ativo(ticker):
         return None
 
     close = df["Close"].values.astype(float)
+    high = df["High"].values.astype(float)
     volume = df["Volume"].values.astype(float)
 
     preco = float(close[-1])
@@ -205,15 +165,7 @@ def analisar_ativo(ticker):
     ema21 = ema(df["Close"], 21).values
     ema72 = ema(df["Close"], 72).values
 
-    obv = calc_obv(close, volume)
-
-    tenkan, kijun, span_a, span_b = ichimoku(df)
-
     score = 0
-
-    # ==================================
-    # TENDÊNCIA
-    # ==================================
 
     if preco > ema21[-1]:
         score += 12
@@ -225,10 +177,6 @@ def analisar_ativo(ticker):
     if slope > 0:
         score += 10
 
-    # ==================================
-    # MOMENTUM
-    # ==================================
-
     ret5 = ((preco / close[-6]) - 1) * 100
     ret10 = ((preco / close[-11]) - 1) * 100
 
@@ -238,92 +186,60 @@ def analisar_ativo(ticker):
     if ret10 > 0:
         score += min(ret10, 8)
 
-    # ==================================
-    # ANTI ESTICADO
-    # ==================================
-
-    dist_ema = ((preco / ema21[-1]) - 1) * 100
-
-    if dist_ema > 8:
-        score -= 18
-    elif dist_ema > 6:
-        score -= 10
-    elif dist_ema > 4:
-        score -= 5
-
-    # ==================================
-    # VOLUME / FLUXO
-    # ==================================
-
     media_vol = np.mean(volume[-20:])
 
     if volume[-1] > media_vol:
         score += 10
 
-    if obv[-1] > np.mean(obv[-10:]):
-        score += 10
-
-    # ==================================
-    # ICHIMOKU
-    # ==================================
-
-    sa = float(span_a.iloc[-1]) if pd.notna(span_a.iloc[-1]) else np.nan
-    sb = float(span_b.iloc[-1]) if pd.notna(span_b.iloc[-1]) else np.nan
-    tk = float(tenkan.iloc[-1]) if pd.notna(tenkan.iloc[-1]) else np.nan
-    kj = float(kijun.iloc[-1]) if pd.notna(kijun.iloc[-1]) else np.nan
-
-    if not np.isnan(sa) and not np.isnan(sb):
-
-        topo = max(sa, sb)
-        base = min(sa, sb)
-
-        if preco > topo:
-            score += 14
-
-        if tk > kj:
-            score += 8
-
-        if sa > sb:
-            score += 8
-
-        # se muito longe da nuvem = esticado
-        dist_nuvem = ((preco / topo) - 1) * 100
-
-        if dist_nuvem > 8:
-            score -= 10
-
-    # ==================================
-    # VOLATILIDADE
-    # ==================================
-
-    vol = pd.Series(close).pct_change().dropna().tail(20).std() * 100
-
-    if vol > 4:
-        score -= min((vol - 4) * 2, 10)
-
-    # ==================================
+    # ==========================
     # WILSON
-    # ==================================
+    # ==========================
 
     checks = [
         preco > ema21[-1],
         ema21[-1] > ema72[-1],
         ret5 > 0,
         volume[-1] > media_vol,
-        obv[-1] > obv[-5],
-        tk > kj if not np.isnan(tk) else False,
-        preco > sa if not np.isnan(sa) else False
+        close[-1] > close[-3]
     ]
 
     positivos = sum(checks)
-
     wil = wilson_score(positivos, len(checks)) * 100
 
     prob = (score * 0.62) + (wil * 0.38)
     prob = max(1, min(prob, 99))
 
     stop = preco * 0.965
-    gain = preco * 1.05
+
+    # =====================================================
+    # 🔥 EDGE METRICS (ADICIONADO SEM MEXER NO RESTO)
+    # =====================================================
+
+    atr = np.std(close[-14:])
+    resistencia = np.max(high[-20:])
+
+    gain_pot = atr * (wil / 100) * 2.2
+    gain_pct = (gain_pot / preco) * 100
+
+    stop_dist = (preco - stop) / preco * 100
+    rr = gain_pct / stop_dist if stop_dist != 0 else 0
+
+    dias = gain_pot / (atr / 14) if atr != 0 else 0
+
+    dist_res = (resistencia - preco) / preco * 100
+
+    gain_dist = abs(resistencia - preco)
+    stop_dist_abs = abs(preco - stop)
+
+    prob_gain_first = (
+        gain_dist / (gain_dist + stop_dist_abs)
+    ) * 100 if (gain_dist + stop_dist_abs) != 0 else 0
+
+    prob_gain_first = prob_gain_first * (wil / 100)
+
+    # =====================================================
+    # STATUS
+    # =====================================================
 
     if prob >= 85:
         status = "🟢 PREMIUM"
@@ -340,119 +256,49 @@ def analisar_ativo(ticker):
         "Ativo": ticker,
         "Preço": round(preco,2),
         "Probabilidade %": round(prob,1),
+
+        "Gain Potencial %": round(gain_pct,2),
+        "RR": round(rr,2),
+        "Dias": round(dias,1),
+        "Distância Resistência %": round(dist_res,2),
+        "Prob Gain Antes Stop %": round(prob_gain_first,1),
+
         "Stop": round(stop,2),
-        "Gain": round(gain,2),
-        "Status": status,
-        "df": df,
-        "ema21": ema21,
-        "ema72": ema72
+        "Status": status
     }
-
-# =====================================================
-# SIDEBAR
-# =====================================================
-
-with st.sidebar:
-
-    st.title("🏹 MENU")
-
-    modo = st.radio(
-        "Escolha:",
-        ["Scanner Inteligente", "Ativo Específico"]
-    )
 
 # =====================================================
 # SCANNER
 # =====================================================
 
-if modo == "Scanner Inteligente":
+st.title("🏹 Scanner V3 ELITE + EDGE METRICS")
 
-    st.title("🏹 Scanner Inteligente V3 ELITE")
+if st.button("🚀 ESCANEAR"):
 
-    if st.button("🚀 ESCANEAR MERCADO"):
+    resultados = []
+    barra = st.progress(0)
 
-        resultados = []
-        barra = st.progress(0)
+    for i, ativo in enumerate(ATIVOS):
 
-        total = len(ATIVOS)
+        r = analisar_ativo(ativo)
 
-        for i, ativo in enumerate(ATIVOS):
+        if r:
 
-            r = analisar_ativo(ativo)
+            # ✔ FILTRO ATUALIZADO
+            if r["Probabilidade %"] >= 70 and r["Prob Gain Antes Stop %"] >= 60:
+                resultados.append(r)
 
-            if r:
-                if r["Probabilidade %"] >= 70:
-                    resultados.append(r)
+        barra.progress((i+1)/len(ATIVOS))
 
-            barra.progress((i+1)/total)
+    if resultados:
 
-        if len(resultados) == 0:
-            st.warning("Nenhum ativo acima de 70% hoje.")
+        df = pd.DataFrame(resultados)
 
-        else:
+        df = df.sort_values("Probabilidade %", ascending=False)
 
-            tabela = pd.DataFrame(resultados)
+        st.success(f"{len(df)} oportunidades encontradas")
 
-            tabela = tabela[
-                ["Ativo","Preço","Probabilidade %","Stop","Gain","Status"]
-            ]
+        st.dataframe(df, use_container_width=True)
 
-            tabela = tabela.sort_values(
-                by="Probabilidade %",
-                ascending=False
-            )
-
-            st.success(f"{len(tabela)} oportunidades encontradas.")
-
-            st.dataframe(
-                tabela,
-                use_container_width=True,
-                hide_index=True
-            )
-
-# =====================================================
-# INDIVIDUAL
-# =====================================================
-
-else:
-
-    st.title("🏹 Análise Individual")
-
-    ticker = st.text_input(
-        "Digite o ticker:",
-        "PETR4"
-    ).upper().replace(".SA","")
-
-    if st.button("🔎 ANALISAR"):
-
-        r = analisar_ativo(ticker)
-
-        if r is None:
-            st.error("Ativo inválido ou sem dados.")
-        else:
-
-            c1,c2,c3,c4 = st.columns(4)
-
-            c1.metric("Preço", f"R$ {r['Preço']}")
-            c2.metric("Probabilidade", f"{r['Probabilidade %']}%")
-            c3.metric("Stop", f"R$ {r['Stop']}")
-            c4.metric("Gain", f"R$ {r['Gain']}")
-
-            st.subheader(r["Status"])
-
-            graf = pd.DataFrame({
-                "Preço": r["df"]["Close"],
-                "EMA21": r["ema21"],
-                "EMA72": r["ema72"]
-            }, index=r["df"].index)
-
-            st.line_chart(graf)
-
-# =====================================================
-# RODAPÉ
-# =====================================================
-
-st.markdown("---")
-st.caption(
-    f"BUY SIDE TERMINAL V3 ELITE | {time.strftime('%d/%m/%Y %H:%M:%S')}"
-)
+    else:
+        st.warning("Nenhum ativo qualificado hoje.")
