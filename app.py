@@ -3,11 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-# =====================================================
-# CONFIG
-# =====================================================
-
-st.set_page_config(page_title="PRO DESK STABLE", layout="wide")
+st.set_page_config(page_title="PRO DESK FIXED FINAL", layout="wide")
 
 SENHA = "LUCRO5"
 
@@ -19,8 +15,7 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-
-    st.title("🏦 PRO DESK STABLE ENGINE")
+    st.title("🏦 PRO DESK FINAL FIXED")
 
     senha = st.text_input("Senha:", type="password")
 
@@ -32,11 +27,10 @@ if not st.session_state.logado:
     st.stop()
 
 # =====================================================
-# UNIVERSO
+# ATIVOS
 # =====================================================
 
-ATIVOS = [
-"PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
+ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
 "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
 "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
@@ -56,11 +50,10 @@ ATIVOS = [
 "WMTB34","NIKE34","ADBE34","CSCO34","INTC34","JPMC34","ORCL34",
 "QCOM34","SBUX34","TXN34","ABTT34","AMGN34","AXPB34","BERK34",
 
-"C2OL34"
-]
+"C2OL34"]
 
 # =====================================================
-# SAFE ARRAY
+# SAFE
 # =====================================================
 
 def safe(x):
@@ -68,18 +61,14 @@ def safe(x):
     x = x[~np.isnan(x)]
     return x if len(x) > 10 else None
 
-# =====================================================
-# EMA
-# =====================================================
-
-def ema(series, n):
-    series = safe(series)
-    if series is None:
+def ema(s, n):
+    s = safe(s)
+    if s is None:
         return np.zeros(10)
-    return pd.Series(series).ewm(span=n, adjust=False).mean().values
+    return pd.Series(s).ewm(span=n, adjust=False).mean().values
 
 # =====================================================
-# REGIME
+# REGIME (QUALITATIVO)
 # =====================================================
 
 def regime(close):
@@ -95,14 +84,12 @@ def regime(close):
 
     if vol > 0.02:
         return "VOLATIL"
-
     if trend > 0.001:
         return "TENDENCIA"
-
     return "LATERAL"
 
 # =====================================================
-# SETUP SCORE (0-100 REAL)
+# SETUP SCORE
 # =====================================================
 
 def setup_score(preco, ema21, ema72, close):
@@ -115,12 +102,10 @@ def setup_score(preco, ema21, ema72, close):
         score += 35
 
     ret5 = (preco / close[-6]) - 1
-
     if ret5 > 0:
         score += min(ret5 * 80, 20)
 
     dist = (preco / ema21) - 1
-
     if dist > 0.08:
         score -= 20
     elif dist > 0.05:
@@ -129,41 +114,41 @@ def setup_score(preco, ema21, ema72, close):
     return max(0, min(score, 100))
 
 # =====================================================
-# PROBABILIDADE CALIBRADA (SEM SATURAÇÃO)
+# PROBABILIDADE (CALIBRADA)
 # =====================================================
 
 def probabilidade(setup):
 
-    # normalização suave (evita 100% artificial)
-    return 100 * (setup / (setup + 40))
+    return (1 / (1 + np.exp(-0.08 * (setup - 50)))) * 100
 
 # =====================================================
-# EDGE (ESTÁVEL E LIMITADO)
+# EDGE (CORRIGIDO)
 # =====================================================
 
-def edge(setup, prob, reg):
+def edge(setup, prob):
 
-    mult = {
-        "TENDENCIA": 1.15,
-        "LATERAL": 1.0,
-        "VOLATIL": 0.75
-    }
+    return (setup * prob) / 120
 
-    raw = setup * (prob / 100) * mult.get(reg, 1)
+# =====================================================
+# SETUP LABEL
+# =====================================================
 
-    # normalização realista (evita explosão)
-    return round(min(raw / 1.5, 100), 2)
+def setup_label(s):
+
+    if s < 40:
+        return "FRACO"
+    elif s < 60:
+        return "NEUTRO"
+    elif s < 80:
+        return "FORTE"
+    return "INSTITUCIONAL"
 
 # =====================================================
 # TARGET FIXO
 # =====================================================
 
 def targets(preco):
-
-    gain = preco * 1.06
-    stop = preco * 0.96
-
-    return round(gain, 2), round(stop, 2)
+    return round(preco * 1.06, 2), round(preco * 0.96, 2)
 
 # =====================================================
 # ANALISAR
@@ -181,7 +166,6 @@ def analisar(t):
         return None
 
     close = safe(df["Close"])
-
     if close is None:
         return None
 
@@ -190,23 +174,20 @@ def analisar(t):
     ema21 = ema(close, 21)
     ema72 = ema(close, 72)
 
-    reg = regime(close)
-
     setup = setup_score(preco, ema21[-1], ema72[-1], close)
 
     prob = probabilidade(setup)
 
-    ed = edge(setup, prob, reg)
+    ed = edge(setup, prob)
 
     gain, stop = targets(preco)
 
     return {
         "Ativo": t,
         "Preço": round(preco,2),
-        "Regime": reg,
-        "Setup": round(setup,2),
+        "Setup": setup_label(setup),
         "Prob": round(prob,2),
-        "Edge": ed,
+        "Edge": round(ed,2),
         "Gain": gain,
         "Stop": stop
     }
@@ -215,34 +196,22 @@ def analisar(t):
 # SCANNER
 # =====================================================
 
-st.title("🏦 PRO DESK - ENGINE ESTÁVEL")
+st.title("🏦 PRO DESK FINAL ESTÁVEL")
 
-if st.button("ESCANEAR MERCADO"):
+if st.button("ESCANEAR"):
 
-    resultados = []
+    res = []
 
     for t in ATIVOS:
-
         r = analisar(t)
-
         if r:
-            resultados.append(r)
+            res.append(r)
 
-    df = pd.DataFrame(resultados)
+    df = pd.DataFrame(res)
 
-    if df.empty:
-        st.warning("Sem dados")
-        st.stop()
-
-    # ranking correto
     df = df.sort_values("Edge", ascending=False)
 
     df.index = range(1, len(df) + 1)
     df.insert(0, "Rank", df.index)
 
-    st.subheader("📊 TODOS OS ATIVOS (EDGE REAL)")
-
-    st.dataframe(
-        df[["Rank","Ativo","Regime","Preço","Setup","Prob","Edge","Gain","Stop"]],
-        use_container_width=True
-    )
+    st.dataframe(df)
