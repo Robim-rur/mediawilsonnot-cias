@@ -1,9 +1,13 @@
+# =====================================================
+# PRO DESK - EDGE PERCENTIL FINAL (ESTÁVEL)
+# =====================================================
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="PRO DESK FIXED FINAL", layout="wide")
+st.set_page_config(page_title="PRO DESK EDGE FINAL", layout="wide")
 
 SENHA = "LUCRO5"
 
@@ -15,7 +19,8 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🏦 PRO DESK FINAL FIXED")
+
+    st.title("🏦 PRO DESK - EDGE FINAL")
 
     senha = st.text_input("Senha:", type="password")
 
@@ -27,10 +32,11 @@ if not st.session_state.logado:
     st.stop()
 
 # =====================================================
-# ATIVOS
+# UNIVERSO
 # =====================================================
 
-ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
+ATIVOS = [
+"PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
 "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
 "SBSP3","EQTL3","HYPE3","MULT3","LREN3","ARZZ3","TOTS3","EMBR3",
@@ -50,7 +56,8 @@ ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "WMTB34","NIKE34","ADBE34","CSCO34","INTC34","JPMC34","ORCL34",
 "QCOM34","SBUX34","TXN34","ABTT34","AMGN34","AXPB34","BERK34",
 
-"C2OL34"]
+"C2OL34"
+]
 
 # =====================================================
 # SAFE
@@ -61,6 +68,10 @@ def safe(x):
     x = x[~np.isnan(x)]
     return x if len(x) > 10 else None
 
+# =====================================================
+# EMA
+# =====================================================
+
 def ema(s, n):
     s = safe(s)
     if s is None:
@@ -68,7 +79,7 @@ def ema(s, n):
     return pd.Series(s).ewm(span=n, adjust=False).mean().values
 
 # =====================================================
-# REGIME (QUALITATIVO)
+# REGIME
 # =====================================================
 
 def regime(close):
@@ -89,7 +100,7 @@ def regime(close):
     return "LATERAL"
 
 # =====================================================
-# SETUP SCORE
+# SETUP SCORE (0-100)
 # =====================================================
 
 def setup_score(preco, ema21, ema72, close):
@@ -114,7 +125,7 @@ def setup_score(preco, ema21, ema72, close):
     return max(0, min(score, 100))
 
 # =====================================================
-# PROBABILIDADE (CALIBRADA)
+# PROBABILIDADE (ESTÁVEL)
 # =====================================================
 
 def probabilidade(setup):
@@ -122,15 +133,15 @@ def probabilidade(setup):
     return (1 / (1 + np.exp(-0.08 * (setup - 50)))) * 100
 
 # =====================================================
-# EDGE (CORRIGIDO)
+# EDGE BRUTO
 # =====================================================
 
-def edge(setup, prob):
+def edge_raw(setup, prob):
 
-    return (setup * prob) / 120
+    return setup * prob
 
 # =====================================================
-# SETUP LABEL
+# LABEL SETUP
 # =====================================================
 
 def setup_label(s):
@@ -178,7 +189,7 @@ def analisar(t):
 
     prob = probabilidade(setup)
 
-    ed = edge(setup, prob)
+    edge = edge_raw(setup, prob)
 
     gain, stop = targets(preco)
 
@@ -186,8 +197,9 @@ def analisar(t):
         "Ativo": t,
         "Preço": round(preco,2),
         "Setup": setup_label(setup),
+        "SetupScore": setup,
         "Prob": round(prob,2),
-        "Edge": round(ed,2),
+        "Edge_raw": edge,
         "Gain": gain,
         "Stop": stop
     }
@@ -196,22 +208,54 @@ def analisar(t):
 # SCANNER
 # =====================================================
 
-st.title("🏦 PRO DESK FINAL ESTÁVEL")
+st.title("🏦 PRO DESK - EDGE PERCENTIL FINAL")
 
-if st.button("ESCANEAR"):
+if st.button("ESCANEAR MERCADO"):
 
-    res = []
+    resultados = []
 
     for t in ATIVOS:
+
         r = analisar(t)
         if r:
-            res.append(r)
+            resultados.append(r)
 
-    df = pd.DataFrame(res)
+    df = pd.DataFrame(resultados)
 
-    df = df.sort_values("Edge", ascending=False)
+    if df.empty:
+        st.warning("Sem dados disponíveis")
+        st.stop()
+
+    # =====================================================
+    # EDGE PERCENTIL (CORREÇÃO PRINCIPAL)
+    # =====================================================
+
+    df["Edge"] = df["Edge_raw"].rank(pct=True) * 100
+
+    # =====================================================
+    # SCORE FINAL (RANKING REAL)
+    # =====================================================
+
+    df["ScoreFinal"] = df["Edge"] * 0.7 + df["Prob"] * 0.3
+
+    df = df.sort_values("ScoreFinal", ascending=False)
 
     df.index = range(1, len(df) + 1)
     df.insert(0, "Rank", df.index)
 
-    st.dataframe(df)
+    st.subheader("📊 TODOS OS ATIVOS (EDGE NORMALIZADO)")
+
+    st.dataframe(
+        df[[
+            "Rank",
+            "Ativo",
+            "Setup",
+            "Preço",
+            "Prob",
+            "Edge",
+            "ScoreFinal",
+            "Gain",
+            "Stop"
+        ]],
+        use_container_width=True
+    )
