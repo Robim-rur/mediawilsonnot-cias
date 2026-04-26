@@ -12,13 +12,11 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 st.set_page_config(
     page_title="Buy-Side Terminal | Wilson Score",
     page_icon="🏹",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
     .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
     </style>
     """, unsafe_allow_html=True)
@@ -35,16 +33,17 @@ def wilson_score(positivos, total):
     numerador = phat + z**2/(2*total) - z * math.sqrt((phat*(1-phat) + z**2/(4*total))/total)
     return max(0, numerador / denominador)
 
-def calcular_sar_parabolico(df, af=0.02, max_af=0.2):
-    # Garantir que os dados são arrays simples para evitar erro de Series Ambiguous
-    high = df['High'].values
-    low = df['Low'].values
-    close = df['Close'].values
+def calcular_sar_parabolico(df):
+    # Usando .values para evitar erros de Series Ambiguous
+    high = df['High'].astype(float).values
+    low = df['Low'].astype(float).values
+    close = df['Close'].astype(float).values
     
     sar = np.copy(close)
     uptrend = True
     ep = high[0]
     sar[0] = low[0]
+    af, max_af = 0.02, 0.2
     af_current = af
     
     for i in range(1, len(close)):
@@ -72,7 +71,7 @@ def calcular_sar_parabolico(df, af=0.02, max_af=0.2):
     return sar
 
 # ==========================================
-# 3. GERENCIAMENTO DE CACHE
+# 3. GERENCIAMENTO DE DADOS (BLINDADO)
 # ==========================================
 
 @st.cache_resource(ttl=600)
@@ -81,13 +80,11 @@ def obter_ticker_seguro(ticker):
 
 @st.cache_data(ttl=300)
 def buscar_historico_completo(ticker):
-    # Auto_adjust=True ajuda a evitar colunas duplicadas
     df = yf.download(ticker, period="100d", interval="1d", progress=False, auto_adjust=True)
     if df.empty: return None
-    # Forçar os nomes das colunas para evitar conflitos de MultiIndex
+    # Achata MultiIndex se existir
     df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-    df = df.ffill().dropna()
-    return df
+    return df.ffill().dropna()
 
 # ==========================================
 # 4. INTERFACE E LÓGICA PRINCIPAL
@@ -95,98 +92,94 @@ def buscar_historico_completo(ticker):
 
 with st.sidebar:
     st.header("🏹 Terminal Buy-Side")
-    ticker_raw = st.text_input("Ticker B3:", "PETR4").upper()
-    ticker_sa = ticker_raw if ticker_raw.endswith(".SA") else f"{ticker_raw}.SA"
-    
-    st.divider()
-    stop_fixo = st.number_input("Stop Loss Fixo (%)", value=5.0)
-    target_fixo = st.number_input("Gain Alvo (%)", value=8.0)
-    
+    ticker_input = st.text_input("Ticker B3:", "PETR4").upper()
+    ticker_sa = ticker_input if ticker_input.endswith(".SA") else f"{ticker_input}.SA"
     btn_analise = st.button("🚀 EXECUTAR SCANNER", use_container_width=True)
 
 if btn_analise:
     try:
-        with st.spinner(f"Analisando confluências para {ticker_raw}..."):
+        with st.spinner(f"Analisando {ticker_input}..."):
             ticker_obj = obter_ticker_seguro(ticker_sa)
             hist = buscar_historico_completo(ticker_sa)
             
             if hist is None:
-                st.error("Erro: Ativo não encontrado ou sem liquidez.")
+                st.error("Erro: Dados do Yahoo indisponíveis para este ativo.")
             else:
-                # Extração de valores puros para evitar erros de Series/Ambiguous
+                # Dados Numéricos
                 precos = hist['Close'].astype(float).values
-                volumes = hist['Volume'].astype(float).values
                 preco_atual = float(precos[-1])
-                
-                # EMA 21
                 ema21 = hist['Close'].ewm(span=21, adjust=False).mean().values
-                
-                # OBV (Cálculo Otimizado com Numpy para evitar erro iloc)
-                obv_values = np.zeros(len(precos))
-                for i in range(1, len(precos)):
-                    if precos[i] > precos[i-1]:
-                        obv_values[i] = obv_values[i-1] + volumes[i]
-                    elif precos[i] < precos[i-1]:
-                        obv_values[i] = obv_values[i-1] - volumes[i]
-                    else:
-                        obv_values[i] = obv_values[i-1]
-                
-                # SAR
                 sar_values = calcular_sar_parabolico(hist)
                 
-                # Sentimento
+                # OBV
+                volumes = hist['Volume'].astype(float).values
+                obv = np.zeros(len(precos))
+                for i in range(1, len(precos)):
+                    if precos[i] > precos[i-1]: obv[i] = obv[i-1] + volumes[i]
+                    elif precos[i] < precos[i-1]: obv[i] = obv[i-1] - volumes[i]
+                    else: obv[i] = obv[i-1]
+
+                # --- CORREÇÃO DO ERRO DE TITLE (NOTÍCIAS) ---
                 analyzer = SentimentIntensityAnalyzer()
-                analyzer.lexicon.update({'lucro': 4.0, 'dividendos': 3.5, 'alta': 2.0, 'ebitda': 2.5})
+                analyzer.lexicon.update({'lucro': 4.0, 'dividendos': 3.5, 'alta': 2.0})
                 
-                noticias = ticker_obj.news
-                titulos = [n['title'] for n in noticias[:12]]
-                scores = [analyzer.polarity_scores(t)['compound'] for t in titulos]
-                score_sent = sum(scores)/len(scores) if scores else 0
+                score_sent = 0
+                titulos_encontrados = []
                 
-                # VALIDAÇÃO DOS 4 PILARES
+                try:
+                    raw_news = ticker_obj.news
+                    if raw_news and len(raw_news) > 0:
+                        for item in raw_news:
+                            # Verifica se 'title' existe no dicionário da notícia
+                            t = item.get('title', '')
+                            if t:
+                                titulos_encontrados.append(t)
+                        
+                        if titulos_encontrados:
+                            scores = [analyzer.polarity_scores(t)['compound'] for t in titulos_encontrados]
+                            score_sent = sum(scores) / len(scores)
+                except:
+                    score_sent = 0 # Falha silenciosa: assume neutro se a API de notícias falhar
+
+                # --- VALIDAÇÃO DOS 4 PILARES ---
                 c1 = bool(preco_atual > ema21[-1])
-                c2 = bool(obv_values[-1] > obv_values[-5])
-                c3 = bool(score_sent > 0.12)
+                c2 = bool(obv[-1] > obv[-5])
+                c3 = bool(score_sent > 0.10)
                 c4 = bool(sar_values[-1] < preco_atual)
                 
                 sinais = sum([c1, c2, c3, c4])
-                confianca_wilson = wilson_score(sinais, 4) * 100
+                confianca = wilson_score(sinais, 4) * 100
                 
-                # OUTPUT
-                st.subheader(f"Resultado da Análise: {ticker_raw}")
+                # --- OUTPUT ---
+                st.subheader(f"Análise: {ticker_input}")
                 
-                m1, m2, m3, m4 = st.columns(4)
+                m1, m2, m3 = st.columns(3)
                 m1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
-                m2.metric("Score Wilson", f"{confianca_wilson:.1f}%")
-                m3.metric("Stop Loss", f"R$ {preco_atual * (1 - stop_fixo/100):.2f}")
-                m4.metric("Gain Alvo", f"R$ {preco_atual * (1 + target_fixo/100):.2f}")
-                
-                st.divider()
+                m2.metric("Confiança Wilson", f"{confianca:.1f}%")
+                m3.metric("Sentimento", f"{score_sent:.2f}")
                 
                 col_info, col_chart = st.columns([1, 2])
                 with col_info:
-                    st.write("### ✅ Checklist de Compra")
-                    st.write(f"{'🟢' if c1 else '🔴'} Tendência (EMA21)")
-                    st.write(f"{'🟢' if c2 else '🔴'} Volume (OBV)")
-                    st.write(f"{'🟢' if c3 else '🔴'} Mídia (Sentimento)")
-                    st.write(f"{'🟢' if c4 else '🔴'} SAR (Momentum)")
+                    st.write("### ✅ Checklist")
+                    st.write(f"{'🟢' if c1 else '🔴'} EMA21")
+                    st.write(f"{'🟢' if c2 else '🔴'} OBV")
+                    st.write(f"{'🟢' if c3 else '🔴'} Notícias")
+                    st.write(f"{'🟢' if c4 else '🔴'} SAR")
                     
-                    if confianca_wilson >= 60:
-                        st.success("**SINAL DE COMPRA CONFIRMADO**")
-                    else:
-                        st.warning("**AGUARDAR CONFLUÊNCIA**")
+                    if confianca >= 60: st.success("SINAL DE COMPRA")
+                    else: st.warning("AGUARDAR CONFLUÊNCIA")
 
                 with col_chart:
-                    df_plot = pd.DataFrame({
-                        'Preço': precos,
-                        'EMA 21': ema21,
-                        'SAR': sar_values
-                    }, index=hist.index)
-                    st.line_chart(df_plot)
+                    st.line_chart(pd.DataFrame({'Preço': precos, 'EMA21': ema21, 'SAR': sar_values}, index=hist.index))
+
+                with st.expander("Ver Manchetes"):
+                    if titulos_encontrados:
+                        for t in titulos_encontrados: st.write(f"- {t}")
+                    else:
+                        st.write("Nenhuma notícia recente encontrada para este ativo.")
 
     except Exception as e:
-        st.error(f"Erro no processamento do ativo {ticker_raw}.")
-        st.write(f"Detalhe técnico: {e}")
+        st.error(f"Erro no processamento.")
+        st.write(f"Detalhes: {e}")
 
-st.markdown("---")
-st.caption(f"Terminal Buy Side Pro | {time.strftime('%d/%m/%Y %H:%M:%S')}")
+st.caption(f"Terminal Buy Side Pro | {time.strftime('%H:%M:%S')}")
