@@ -1,5 +1,5 @@
 # app.py
-# BUY SIDE TERMINAL V4 ELITE HC - FIXED VERSION (NO ERRORS)
+# BUY SIDE TERMINAL V4 ELITE HC - FIXED + 60% FILTER
 
 import streamlit as st
 import yfinance as yf
@@ -77,10 +77,6 @@ ATIVOS = [
 def ema(series, n):
     return series.ewm(span=n, adjust=False).mean()
 
-# =====================================================
-# ANÁLISE HISTÓRICA SIMPLIFICADA
-# =====================================================
-
 def historical_calibration(close, signal):
 
     wins = 0
@@ -112,7 +108,7 @@ def historical_calibration(close, signal):
     return wins / total
 
 # =====================================================
-# CORE ANALYSIS
+# ANÁLISE
 # =====================================================
 
 def analisar(ticker):
@@ -131,10 +127,6 @@ def analisar(ticker):
     if len(df) < 150:
         return None
 
-    # =====================================================
-    # NORMALIZAÇÃO SEGURA (CRÍTICO)
-    # =====================================================
-
     close = np.array(df["Close"]).flatten()
     volume = np.array(df["Volume"]).flatten()
 
@@ -150,7 +142,7 @@ def analisar(ticker):
     ema72 = ema(pd.Series(close), 72).values
 
     # =====================================================
-    # SCORE + SIGNALS
+    # SCORE + SIGNAL
     # =====================================================
 
     score = 0
@@ -207,11 +199,10 @@ def analisar(ticker):
     prob = prob * calib
 
     # =====================================================
-    # VOLATILIDADE REGIME (CORRIGIDO DEFINITIVO)
+    # VOLATILIDADE (CORRIGIDO)
     # =====================================================
 
     window = np.array(close[-21:]).flatten()
-
     window = window[~np.isnan(window)]
 
     if len(window) < 21:
@@ -243,7 +234,7 @@ def analisar(ticker):
 
     gain = atr * 2.2 * prob / 100
 
-    rr = gain / (preco - stop) if (preco - stop) != 0 else 0
+    rr = gain / (preco - stop) if preco != stop else 0
 
     edge = (prob/100 * gain) - ((1 - prob/100) * (preco - stop))
 
@@ -261,7 +252,7 @@ def analisar(ticker):
 # SCANNER
 # =====================================================
 
-st.title("🏹 V4 ELITE HC - FIXED ENGINE")
+st.title("🏹 V4 ELITE HC - FILTRO 60% ATIVO")
 
 if st.button("ESCANEAR MERCADO"):
 
@@ -275,13 +266,14 @@ if st.button("ESCANEAR MERCADO"):
 
         r = analisar(t)
 
-        if r:
+        # ✔ FILTRO CORRETO AQUI (60%)
+        if r and r["Prob"] >= 60:
             resultados.append(r)
 
         barra.progress((i+1)/total)
 
     if len(resultados) == 0:
-        st.warning("Nenhum ativo válido encontrado.")
+        st.warning("Nenhum ativo acima de 60% encontrado.")
         st.stop()
 
     df = pd.DataFrame(resultados)
@@ -290,7 +282,7 @@ if st.button("ESCANEAR MERCADO"):
 
     top8 = df.head(8)
 
-    st.subheader("🏆 TOP 8 TRADES")
+    st.subheader("🏆 TOP 8 TRADES (FILTRADOS > 60%)")
 
     st.dataframe(top8, use_container_width=True)
 
