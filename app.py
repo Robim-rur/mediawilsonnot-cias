@@ -1,33 +1,49 @@
-# =====================================================
-# V4 ELITE PRO - FINAL DECISION ENGINE
-# =====================================================
+# app.py
+# BUY SIDE TERMINAL V4 ELITE - PRICE TARGET FIX
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import math
+import time
 
-st.set_page_config(page_title="V4 ELITE PRO", layout="wide")
+# =====================================================
+# CONFIG
+# =====================================================
+
+st.set_page_config(
+    page_title="BUY SIDE TERMINAL V4 ELITE",
+    page_icon="🏹",
+    layout="wide"
+)
 
 SENHA = "LUCRO5"
+
+# =====================================================
+# LOGIN
+# =====================================================
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🏹 V4 ELITE PRO FINAL")
 
-    senha = st.text_input("Senha:", type="password")
+    st.title("🏹 BUY SIDE TERMINAL V4 ELITE")
+
+    senha_input = st.text_input("Digite a senha:", type="password")
 
     if st.button("ENTRAR"):
-        if senha == SENHA:
+        if senha_input == SENHA:
             st.session_state.logado = True
             st.rerun()
+        else:
+            st.error("Senha incorreta")
 
     st.stop()
 
 # =====================================================
-# UNIVERSO
+# ATIVOS
 # =====================================================
 
 ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
@@ -53,48 +69,73 @@ ATIVOS = ["PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "C2OL34"]
 
 # =====================================================
-# SAFE
+# FUNÇÕES SEGURAS
 # =====================================================
 
-def safe(x):
+def safe_array(x):
     x = np.array(x, dtype=float).reshape(-1)
     x = x[~np.isnan(x)]
-    return x if len(x) > 5 else None
+    return x if len(x) > 10 else None
+
 
 def ema(s, n):
-    s = safe(s)
+    s = safe_array(s)
     if s is None:
         return np.zeros(10)
-    return pd.Series(s).ewm(span=n).mean().values
+    return pd.Series(s).ewm(span=n, adjust=False).mean().values
+
+
+def atr(close):
+    close = safe_array(close)
+    if close is None or len(close) < 15:
+        return 0
+    return np.mean(np.abs(np.diff(close[-14:])))
 
 # =====================================================
-# SETUP DETECTOR
+# TARGETS EM PREÇO (VERSÃO CORRIGIDA)
 # =====================================================
 
-def setup(close, ema21, ema72):
+def targets_preco(close):
 
-    if close[-1] > ema21[-1] > ema72[-1]:
-        return "TREND"
+    close = safe_array(close)
+    if close is None:
+        return None, None
 
-    if close[-1] < ema21[-1] and close[-1] > close[-5]:
-        return "REVERSÃO"
+    atual = close[-1]
 
-    return "MOMENTUM"
+    high20 = np.max(close[-20:])
+    low20 = np.min(close[-20:])
+
+    volatility = atr(close)
+
+    # =========================
+    # STOP (PREÇO REAL)
+    # =========================
+
+    stop = low20 - volatility
+
+    # =========================
+    # GAIN (PREÇO REAL)
+    # =========================
+
+    gain = high20 + volatility
+
+    return round(gain, 2), round(stop, 2)
 
 # =====================================================
-# ANALISE
+# ANALISAR ATIVO
 # =====================================================
 
-def analisar(t):
+def analisar(ticker):
 
-    df = yf.download(t+".SA", period="300d", interval="1d",
+    df = yf.download(ticker + ".SA", period="300d", interval="1d",
                      auto_adjust=True, progress=False)
 
     if df is None or df.empty:
         return None
 
-    close = safe(df["Close"])
-    volume = safe(df["Volume"])
+    close = safe_array(df["Close"])
+    volume = safe_array(df["Volume"])
 
     if close is None:
         return None
@@ -104,79 +145,75 @@ def analisar(t):
     ema21 = ema(close, 21)
     ema72 = ema(close, 72)
 
-    setup_type = setup(close, ema21, ema72)
-
     trend = preco > ema21[-1] > ema72[-1]
-    mom = preco / close[-5] - 1
+
+    momentum = preco / close[-5] - 1
 
     score = 0
-    if trend: score += 1
-    score += mom * 5
+    if trend:
+        score += 1
+    score += momentum * 5
 
-    vol = np.std(np.diff(close)/close[:-1])
+    vol = np.std(np.diff(close) / close[:-1])
 
-    # =================================================
-    # PROBABILIDADE
-    # =================================================
+    # =========================
+    # PROBABILIDADE (NORMALIZADA)
+    # =========================
 
-    z = score
-    prob = 1 / (1 + np.exp(-z * 2)) * 100
+    prob = 1 / (1 + np.exp(-score * 2)) * 100
 
-    # =================================================
-    # GAIN / LOSS (RESTAURADO)
-    # =================================================
+    # =========================
+    # TARGETS EM PREÇO
+    # =========================
 
-    gain = vol * 2.8
-    stop = vol * 1.6
-
-    # =================================================
-    # EDGE
-    # =================================================
-
-    edge = (prob/100 * gain) - ((1 - prob/100) * stop)
+    gain, stop = targets_preco(close)
 
     return {
-        "Ativo": t,
-        "Preço": preco,
-        "Prob": prob,
-        "Edge": edge,
+        "Ativo": ticker,
+        "Preço": round(preco,2),
+        "Prob": round(prob,2),
         "Gain": gain,
         "Stop": stop,
-        "Setup": setup_type
+        "score": score
     }
 
 # =====================================================
 # SCANNER
 # =====================================================
 
-st.title("🏹 V4 ELITE PRO - DECISION TABLE")
+st.title("🏹 SCANNER V4 ELITE - PRICE TARGET")
 
-if st.button("ESCANEAR"):
+if st.button("ESCANEAR MERCADO"):
 
-    data = []
+    resultados = []
 
     for t in ATIVOS:
         r = analisar(t)
         if r:
-            data.append(r)
+            resultados.append(r)
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(resultados)
 
-    # =================================================
-    # RANKING REAL
-    # =================================================
+    if df.empty:
+        st.warning("Sem dados suficientes")
+        st.stop()
 
-    df["rank_score"] = 0.6 * df["Edge"] + 0.4 * df["Prob"]
+    # =========================
+    # RANKING
+    # =========================
+
+    df["rank_score"] = df["Prob"] * 0.6 + df["score"] * 10
 
     df = df.sort_values("rank_score", ascending=False).reset_index(drop=True)
 
-    df.index = df.index + 1   # 🔥 ranking 1,2,3...
-
+    df.index = df.index + 1
     df.insert(0, "Rank", df.index)
 
-    st.subheader("🏆 TOP SETUPS")
+    # =========================
+    # RESULTADO FINAL
+    # =========================
 
     st.dataframe(
-        df[["Rank","Ativo","Setup","Preço","Prob","Edge","Gain","Stop"]],
+        df[["Rank","Ativo","Preço","Prob","Gain","Stop"]],
         use_container_width=True
     )
