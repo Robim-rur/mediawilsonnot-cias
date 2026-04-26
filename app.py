@@ -1,5 +1,5 @@
 # app.py
-# BUY SIDE TERMINAL V4 ELITE - EDGE ENGINE + SIMULADOR + ZERO CRASH
+# BUY SIDE TERMINAL V4 ELITE - INSTITUTIONAL STABLE ENGINE
 
 import streamlit as st
 import yfinance as yf
@@ -68,7 +68,7 @@ if not st.session_state.logado:
     st.stop()
 
 # =====================================================
-# UNIVERSO (INSIRA SUA LISTA COMPLETA 178 AQUI)
+# ATIVOS (COLE SUA LISTA DE 178 AQUI)
 # =====================================================
 
 ATIVOS = [
@@ -96,140 +96,146 @@ ATIVOS = [
 ]
 
 # =====================================================
-# FUNÇÕES
+# FUNÇÕES BASE
 # =====================================================
 
 def ema(series, n):
     return series.ewm(span=n, adjust=False).mean()
 
+# =====================================================
+# ANÁLISE DO ATIVO (ROBUSTA)
+# =====================================================
 
 def analisar(ticker):
 
-    df = yf.download(
-        ticker + ".SA",
-        period="260d",
-        interval="1d",
-        auto_adjust=True,
-        progress=False
-    )
+    try:
 
-    if df is None or df.empty:
+        df = yf.download(
+            ticker + ".SA",
+            period="260d",
+            interval="1d",
+            auto_adjust=True,
+            progress=False
+        )
+
+        if df is None or df.empty:
+            return None
+
+        if len(df) < 130:
+            return None
+
+        # FORÇA 1D (CORREÇÃO DEFINITIVA YFINANCE)
+        close = np.array(df["Close"]).flatten()
+        volume = np.array(df["Volume"]).flatten()
+
+        if len(close) < 130:
+            return None
+
+        preco = close[-1]
+
+        ema21 = ema(pd.Series(close), 21).values
+        ema72 = ema(pd.Series(close), 72).values
+
+        # =====================================================
+        # SCORE BASE
+        # =====================================================
+
+        score = 0
+
+        if preco > ema21[-1]:
+            score += 15
+
+        if ema21[-1] > ema72[-1]:
+            score += 15
+
+        ret5 = (preco / close[-6] - 1) * 100
+
+        if ret5 > 0:
+            score += min(ret5 * 2, 15)
+
+        vol_media = np.mean(volume[-20:])
+
+        if volume[-1] > vol_media:
+            score += 10
+
+        # =====================================================
+        # WILSON SCORE
+        # =====================================================
+
+        checks = [
+            preco > ema21[-1],
+            ema21[-1] > ema72[-1],
+            ret5 > 0,
+            volume[-1] > vol_media
+        ]
+
+        pos = sum(checks)
+
+        wil = (pos / len(checks)) * 100
+
+        prob = wil
+
+        # =====================================================
+        # VOLATILIDADE (ANTI-CRASH DEFINITIVO)
+        # =====================================================
+
+        window_raw = np.array(close[-25:]).flatten()
+        window_raw = window_raw[~np.isnan(window_raw)]
+
+        if len(window_raw) < 21:
+            return None
+
+        window = window_raw[-21:]
+
+        ret = np.diff(window) / window[:-1]
+        vol = np.std(ret) * 100
+
+        if vol < 1.2:
+            adj = 1.15
+        elif vol < 2.5:
+            adj = 1.0
+        else:
+            adj = 0.75
+
+        prob_adj = prob * adj
+
+        # =====================================================
+        # RISCO / RETORNO
+        # =====================================================
+
+        stop = preco * 0.965
+        atr = np.std(close[-14:])
+
+        gain = atr * 2.2 * (prob_adj / 100)
+
+        rr = gain / (preco - stop) if (preco - stop) != 0 else 0
+
+        # =====================================================
+        # EDGE REAL
+        # =====================================================
+
+        risco = preco - stop
+
+        edge = (prob_adj / 100 * gain) - ((1 - prob_adj / 100) * risco)
+
+        return {
+            "Ativo": ticker,
+            "Preço": round(preco,2),
+            "Prob": round(prob_adj,2),
+            "Gain": round(gain,2),
+            "RR": round(rr,2),
+            "EDGE": round(edge,4),
+            "Stop": round(stop,2)
+        }
+
+    except:
         return None
-
-    if len(df) < 130:
-        return None
-
-    close = df["Close"].dropna().values.astype(float)
-    volume = df["Volume"].dropna().values.astype(float)
-
-    if len(close) < 130:
-        return None
-
-    preco = close[-1]
-
-    ema21 = ema(df["Close"], 21).values
-    ema72 = ema(df["Close"], 72).values
-
-    # =====================================================
-    # SCORE BASE
-    # =====================================================
-
-    score = 0
-
-    if preco > ema21[-1]:
-        score += 15
-
-    if ema21[-1] > ema72[-1]:
-        score += 15
-
-    ret5 = (preco / close[-6] - 1) * 100
-
-    if ret5 > 0:
-        score += min(ret5 * 2, 15)
-
-    vol_media = np.mean(volume[-20:])
-
-    if volume[-1] > vol_media:
-        score += 10
-
-    # =====================================================
-    # WILSON SCORE
-    # =====================================================
-
-    checks = [
-        preco > ema21[-1],
-        ema21[-1] > ema72[-1],
-        ret5 > 0,
-        volume[-1] > vol_media
-    ]
-
-    pos = sum(checks)
-
-    wil = (pos / len(checks)) * 100
-
-    prob = wil
-
-    # =====================================================
-    # REGIME DE VOLATILIDADE (CORRIGIDO DEFINITIVO)
-    # =====================================================
-
-    window_raw = close[-25:]
-    window = pd.Series(window_raw).dropna().values
-
-    if len(window) < 21:
-        return None
-
-    window = window[-21:]
-
-    if len(window) < 21:
-        return None
-
-    ret = np.diff(window) / window[:-1]
-    vol = np.std(ret) * 100
-
-    if vol < 1.2:
-        adj = 1.15
-    elif vol < 2.5:
-        adj = 1.0
-    else:
-        adj = 0.75
-
-    prob_adj = prob * adj
-
-    # =====================================================
-    # RISCO / RETORNO
-    # =====================================================
-
-    stop = preco * 0.965
-    atr = np.std(close[-14:])
-
-    gain = atr * 2.2 * (prob_adj / 100)
-
-    rr = gain / (preco - stop) if (preco - stop) != 0 else 0
-
-    # =====================================================
-    # EDGE REAL
-    # =====================================================
-
-    risco = preco - stop
-
-    edge = (prob_adj / 100 * gain) - ((1 - prob_adj / 100) * risco)
-
-    return {
-        "Ativo": ticker,
-        "Preço": round(preco,2),
-        "Prob": round(prob_adj,2),
-        "Gain": round(gain,2),
-        "RR": round(rr,2),
-        "EDGE": round(edge,4),
-        "Stop": round(stop,2)
-    }
 
 # =====================================================
 # SCANNER
 # =====================================================
 
-st.title("🏹 V4 ELITE EDGE SYSTEM")
+st.title("🏹 V4 ELITE EDGE INSTITUCIONAL")
 
 if st.button("ESCANEAR MERCADO"):
 
@@ -249,7 +255,7 @@ if st.button("ESCANEAR MERCADO"):
         barra.progress((i+1)/total)
 
     if len(resultados) == 0:
-        st.warning("Nenhum ativo válido encontrado.")
+        st.warning("Nenhuma oportunidade válida encontrada.")
         st.stop()
 
     df = pd.DataFrame(resultados)
@@ -282,7 +288,7 @@ if st.button("ESCANEAR MERCADO"):
 
     st.subheader("📊 SIMULAÇÃO MENSAL (8 TRADES)")
 
-    st.write(f"Expectativa mensal: {ev_total * 100:.2f}%")
+    st.write(f"Expectativa mensal estimada: {ev_total * 100:.2f}%")
 
     if ev_total >= 0.05:
         st.success("Meta de +5% ao mês estatisticamente viável")
