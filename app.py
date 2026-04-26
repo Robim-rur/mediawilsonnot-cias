@@ -1,6 +1,6 @@
 # app.py
-# BUY SIDE TERMINAL V3 ELITE
-# Login + Scanner + Ichimoku + Anti-Esticado + Score Real
+# BUY SIDE TERMINAL V3.1 ELITE PROFIT TARGET
+# Login + Scanner + Gain Potencial + Stop Inteligente + RR
 # Arquivo completo pronto para colar
 
 import streamlit as st
@@ -15,7 +15,7 @@ import time
 # =====================================================
 
 st.set_page_config(
-    page_title="BUY SIDE TERMINAL V3 ELITE",
+    page_title="BUY SIDE TERMINAL V3.1 ELITE",
     page_icon="🏹",
     layout="wide"
 )
@@ -56,7 +56,7 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏹 BUY SIDE TERMINAL V3 ELITE")
+    st.title("🏹 BUY SIDE TERMINAL V3.1 ELITE")
     st.subheader("Área Restrita")
 
     senha_input = st.text_input("Digite a senha:", type="password")
@@ -171,6 +171,21 @@ def calc_obv(close, volume):
     return obv
 
 
+def atr(df, periodo=14):
+
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+
+    tr1 = high - low
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    return tr.rolling(periodo).mean()
+
+
 def ichimoku(df):
 
     high9 = df["High"].rolling(9).max()
@@ -199,7 +214,6 @@ def analisar_ativo(ticker):
 
     close = df["Close"].values.astype(float)
     volume = df["Volume"].values.astype(float)
-
     preco = float(close[-1])
 
     ema21 = ema(df["Close"], 21).values
@@ -209,11 +223,13 @@ def analisar_ativo(ticker):
 
     tenkan, kijun, span_a, span_b = ichimoku(df)
 
-    score = 0
+    atr_val = float(atr(df).iloc[-1])
 
-    # ==================================
-    # TENDÊNCIA
-    # ==================================
+    # =================================================
+    # SCORE
+    # =================================================
+
+    score = 0
 
     if preco > ema21[-1]:
         score += 12
@@ -221,13 +237,8 @@ def analisar_ativo(ticker):
     if ema21[-1] > ema72[-1]:
         score += 12
 
-    slope = ema21[-1] - ema21[-5]
-    if slope > 0:
+    if ema21[-1] > ema21[-5]:
         score += 10
-
-    # ==================================
-    # MOMENTUM
-    # ==================================
 
     ret5 = ((preco / close[-6]) - 1) * 100
     ret10 = ((preco / close[-11]) - 1) * 100
@@ -238,10 +249,7 @@ def analisar_ativo(ticker):
     if ret10 > 0:
         score += min(ret10, 8)
 
-    # ==================================
-    # ANTI ESTICADO
-    # ==================================
-
+    # Anti-esticado
     dist_ema = ((preco / ema21[-1]) - 1) * 100
 
     if dist_ema > 8:
@@ -251,10 +259,7 @@ def analisar_ativo(ticker):
     elif dist_ema > 4:
         score -= 5
 
-    # ==================================
-    # VOLUME / FLUXO
-    # ==================================
-
+    # Volume
     media_vol = np.mean(volume[-20:])
 
     if volume[-1] > media_vol:
@@ -263,19 +268,15 @@ def analisar_ativo(ticker):
     if obv[-1] > np.mean(obv[-10:]):
         score += 10
 
-    # ==================================
-    # ICHIMOKU
-    # ==================================
-
-    sa = float(span_a.iloc[-1]) if pd.notna(span_a.iloc[-1]) else np.nan
-    sb = float(span_b.iloc[-1]) if pd.notna(span_b.iloc[-1]) else np.nan
+    # Ichimoku
     tk = float(tenkan.iloc[-1]) if pd.notna(tenkan.iloc[-1]) else np.nan
     kj = float(kijun.iloc[-1]) if pd.notna(kijun.iloc[-1]) else np.nan
+    sa = float(span_a.iloc[-1]) if pd.notna(span_a.iloc[-1]) else np.nan
+    sb = float(span_b.iloc[-1]) if pd.notna(span_b.iloc[-1]) else np.nan
 
     if not np.isnan(sa) and not np.isnan(sb):
 
         topo = max(sa, sb)
-        base = min(sa, sb)
 
         if preco > topo:
             score += 14
@@ -286,44 +287,62 @@ def analisar_ativo(ticker):
         if sa > sb:
             score += 8
 
-        # se muito longe da nuvem = esticado
-        dist_nuvem = ((preco / topo) - 1) * 100
-
-        if dist_nuvem > 8:
-            score -= 10
-
-    # ==================================
-    # VOLATILIDADE
-    # ==================================
-
+    # Volatilidade
     vol = pd.Series(close).pct_change().dropna().tail(20).std() * 100
 
     if vol > 4:
         score -= min((vol - 4) * 2, 10)
 
-    # ==================================
+    # =================================================
     # WILSON
-    # ==================================
+    # =================================================
 
     checks = [
         preco > ema21[-1],
         ema21[-1] > ema72[-1],
         ret5 > 0,
+        ret10 > 0,
         volume[-1] > media_vol,
         obv[-1] > obv[-5],
-        tk > kj if not np.isnan(tk) else False,
-        preco > sa if not np.isnan(sa) else False
+        tk > kj if not np.isnan(tk) else False
     ]
 
     positivos = sum(checks)
 
     wil = wilson_score(positivos, len(checks)) * 100
 
+    # =================================================
+    # PROB FINAL
+    # =================================================
+
     prob = (score * 0.62) + (wil * 0.38)
     prob = max(1, min(prob, 99))
 
-    stop = preco * 0.965
-    gain = preco * 1.05
+    # =================================================
+    # STOP INTELIGENTE
+    # =================================================
+
+    stop_pct = max(2.0, min((atr_val / preco) * 100 * 1.4, 6.0))
+
+    stop_preco = preco * (1 - stop_pct / 100)
+
+    # =================================================
+    # GAIN POTENCIAL
+    # =================================================
+
+    gain_pct = max(2.0, min(stop_pct * (prob / 55), 12.0))
+
+    gain_preco = preco * (1 + gain_pct / 100)
+
+    # =================================================
+    # RR
+    # =================================================
+
+    rr = gain_pct / stop_pct
+
+    # =================================================
+    # STATUS
+    # =================================================
 
     if prob >= 85:
         status = "🟢 PREMIUM"
@@ -340,8 +359,11 @@ def analisar_ativo(ticker):
         "Ativo": ticker,
         "Preço": round(preco,2),
         "Probabilidade %": round(prob,1),
-        "Stop": round(stop,2),
-        "Gain": round(gain,2),
+        "Gain %": round(gain_pct,2),
+        "Gain R$": round(gain_preco,2),
+        "Stop %": round(stop_pct,2),
+        "Stop R$": round(stop_preco,2),
+        "RR": round(rr,2),
         "Status": status,
         "df": df,
         "ema21": ema21,
@@ -349,7 +371,7 @@ def analisar_ativo(ticker):
     }
 
 # =====================================================
-# SIDEBAR
+# MENU
 # =====================================================
 
 with st.sidebar:
@@ -367,7 +389,7 @@ with st.sidebar:
 
 if modo == "Scanner Inteligente":
 
-    st.title("🏹 Scanner Inteligente V3 ELITE")
+    st.title("🏹 Scanner Inteligente V3.1")
 
     if st.button("🚀 ESCANEAR MERCADO"):
 
@@ -381,24 +403,29 @@ if modo == "Scanner Inteligente":
             r = analisar_ativo(ativo)
 
             if r:
-                if r["Probabilidade %"] >= 70:
+                if r["Probabilidade %"] >= 70 and r["RR"] >= 1.5:
                     resultados.append(r)
 
             barra.progress((i+1)/total)
 
         if len(resultados) == 0:
-            st.warning("Nenhum ativo acima de 70% hoje.")
+            st.warning("Nenhum ativo aprovado hoje.")
 
         else:
 
             tabela = pd.DataFrame(resultados)
 
             tabela = tabela[
-                ["Ativo","Preço","Probabilidade %","Stop","Gain","Status"]
+                [
+                    "Ativo","Preço","Probabilidade %",
+                    "Gain %","Gain R$",
+                    "Stop %","Stop R$",
+                    "RR","Status"
+                ]
             ]
 
             tabela = tabela.sort_values(
-                by="Probabilidade %",
+                by=["Probabilidade %","RR"],
                 ascending=False
             )
 
@@ -429,16 +456,20 @@ else:
 
         if r is None:
             st.error("Ativo inválido ou sem dados.")
+
         else:
 
             c1,c2,c3,c4 = st.columns(4)
 
             c1.metric("Preço", f"R$ {r['Preço']}")
             c2.metric("Probabilidade", f"{r['Probabilidade %']}%")
-            c3.metric("Stop", f"R$ {r['Stop']}")
-            c4.metric("Gain", f"R$ {r['Gain']}")
+            c3.metric("Gain", f"{r['Gain %']}%")
+            c4.metric("RR", f"{r['RR']}")
 
-            st.subheader(r["Status"])
+            c5,c6 = st.columns(2)
+
+            c5.metric("Stop Ideal", f"{r['Stop %']}%")
+            c6.metric("Status", r["Status"])
 
             graf = pd.DataFrame({
                 "Preço": r["df"]["Close"],
@@ -454,5 +485,5 @@ else:
 
 st.markdown("---")
 st.caption(
-    f"BUY SIDE TERMINAL V3 ELITE | {time.strftime('%d/%m/%Y %H:%M:%S')}"
+    f"BUY SIDE TERMINAL V3.1 ELITE PROFIT TARGET | {time.strftime('%d/%m/%Y %H:%M:%S')}"
 )
