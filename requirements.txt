@@ -3,3 +3,4 @@ yfinance
 pandas
 textblob
 vaderSentiment
+curl_cffi
