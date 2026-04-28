@@ -1,6 +1,6 @@
 # =====================================================
-# BUY SIDE TERMINAL V5 ELITE FINAL
-# Scanner + Busca Individual + Gráfico + Ranking
+# BUY SIDE TERMINAL V5 TURBO
+# Rápido + Scanner + Busca Individual + Ranking
 # Código completo pronto para colar
 # =====================================================
 
@@ -9,13 +9,14 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # =====================================================
 # CONFIG
 # =====================================================
 
 st.set_page_config(
-    page_title="BUY SIDE TERMINAL V5 ELITE FINAL",
+    page_title="BUY SIDE TERMINAL V5 TURBO",
     page_icon="🏹",
     layout="wide"
 )
@@ -35,8 +36,8 @@ st.markdown("""
 }
 .stButton button {
     width:100%;
-    border-radius:10px;
     height:44px;
+    border-radius:10px;
 }
 .stMetric {
     background:#161b22;
@@ -56,7 +57,7 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏹 BUY SIDE TERMINAL V5 ELITE FINAL")
+    st.title("🏹 BUY SIDE TERMINAL V5 TURBO")
     st.subheader("Área Restrita")
 
     senha = st.text_input("Digite a senha:", type="password")
@@ -71,10 +72,15 @@ if not st.session_state.logado:
     st.stop()
 
 # =====================================================
-# UNIVERSO
+# LISTAS
 # =====================================================
 
-ATIVOS = [
+ATIVOS_RAPIDO = [
+"PETR4","VALE3","BBAS3","ITUB4","WEGE3","PRIO3","RENT3",
+"BOVA11","IVVB11","HGLG11","MXRF11","KNRI11"
+]
+
+ATIVOS_COMPLETO = [
 "PETR4","VALE3","BBAS3","ITUB4","BBDC4","WEGE3","PRIO3","RENT3",
 "ELET3","ELET6","CPLE6","CMIG4","TAEE11","EGIE3","VIVT3","TIMS3",
 "ABEV3","RADL3","SUZB3","GGBR4","GOAU4","USIM5","CSNA3","RAIL3",
@@ -98,8 +104,6 @@ ATIVOS = [
 "C2OL34"
 ]
 
-ATIVOS = list(dict.fromkeys(ATIVOS))
-
 # =====================================================
 # FUNÇÕES
 # =====================================================
@@ -109,7 +113,7 @@ def safe(x):
     x = x[~np.isnan(x)]
     return x if len(x) > 30 else None
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=1800)
 def baixar_dados(ticker):
 
     try:
@@ -118,7 +122,8 @@ def baixar_dados(ticker):
             period="320d",
             interval="1d",
             auto_adjust=True,
-            progress=False
+            progress=False,
+            threads=False
         )
 
         if df.empty:
@@ -239,41 +244,55 @@ with st.sidebar:
     )
 
 # =====================================================
-# SCANNER MERCADO
+# SCANNER
 # =====================================================
 
 if modo == "Scanner Mercado":
 
-    st.title("🏹 Scanner Mercado V5 Elite")
+    st.title("🏹 Scanner Mercado TURBO")
 
-    if st.button("🚀 ESCANEAR MERCADO"):
+    tipo = st.radio(
+        "Modo Scanner:",
+        ["Rápido", "Completo"]
+    )
 
-        resultados = []
+    ativos = ATIVOS_RAPIDO if tipo == "Rápido" else ATIVOS_COMPLETO
+
+    if st.button("🚀 ESCANEAR"):
 
         barra = st.progress(0)
+        resultados = []
 
-        total = len(ATIVOS)
+        total = len(ativos)
 
-        for i, ativo in enumerate(ATIVOS):
+        with ThreadPoolExecutor(max_workers=8) as executor:
 
-            r = analisar_ativo(ativo)
+            futures = {
+                executor.submit(analisar_ativo, t): t
+                for t in ativos
+            }
 
-            if r:
-                resultados.append(r)
+            concluido = 0
 
-            barra.progress((i+1)/total)
+            for future in as_completed(futures):
+
+                r = future.result()
+
+                if r:
+                    resultados.append(r)
+
+                concluido += 1
+                barra.progress(concluido / total)
 
         if len(resultados) == 0:
-            st.warning("Nenhum resultado encontrado.")
+            st.warning("Nenhum ativo encontrado.")
 
         else:
 
             tabela = pd.DataFrame(resultados)
 
-            # EDGE PERCENTIL
             tabela["Edge"] = tabela["SetupScore"].rank(pct=True) * 100
 
-            # SCORE FINAL
             tabela["ScoreFinal"] = (
                 tabela["Edge"] * 0.7 +
                 tabela["Prob"] * 0.3
@@ -292,22 +311,16 @@ if modo == "Scanner Mercado":
             st.dataframe(
                 tabela[
                     [
-                        "Rank",
-                        "Ativo",
-                        "Setup",
-                        "Preço",
-                        "Prob",
-                        "Edge",
-                        "ScoreFinal",
-                        "Gain",
-                        "Stop"
+                        "Rank","Ativo","Setup","Preço",
+                        "Prob","Edge","ScoreFinal",
+                        "Gain","Stop"
                     ]
                 ],
                 use_container_width=True
             )
 
 # =====================================================
-# ATIVO ESPECÍFICO
+# INDIVIDUAL
 # =====================================================
 
 else:
@@ -315,7 +328,7 @@ else:
     st.title("🏹 Análise Individual")
 
     ticker = st.text_input(
-        "Digite o ticker:",
+        "Digite ticker:",
         "PETR4"
     ).upper().replace(".SA","")
 
@@ -324,22 +337,21 @@ else:
         r = analisar_ativo(ticker)
 
         if r is None:
-            st.error("Ativo inválido ou sem dados.")
+            st.error("Ativo inválido.")
 
         else:
 
             c1,c2,c3,c4 = st.columns(4)
 
             c1.metric("Preço", f"R$ {r['Preço']}")
-            c2.metric("Probabilidade", f"{r['Prob']}%")
+            c2.metric("Prob", f"{r['Prob']}%")
             c3.metric("Gain", f"R$ {r['Gain']}")
             c4.metric("Stop", f"R$ {r['Stop']}")
 
             st.subheader(r["Setup"])
 
-            # semáforo
             if r["Prob"] >= 75:
-                st.success("🟢 Comprar / Forte")
+                st.success("🟢 Forte")
             elif r["Prob"] >= 60:
                 st.warning("🟡 Observar")
             else:
@@ -359,5 +371,5 @@ else:
 
 st.markdown("---")
 st.caption(
-    f"BUY SIDE TERMINAL V5 ELITE FINAL | {time.strftime('%d/%m/%Y %H:%M:%S')}"
+    f"BUY SIDE TERMINAL V5 TURBO | {time.strftime('%d/%m/%Y %H:%M:%S')}"
 )
