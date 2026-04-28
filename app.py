@@ -1,15 +1,51 @@
 # =====================================================
-# PRO DESK - EDGE PERCENTIL FINAL (ESTÁVEL)
+# BUY SIDE TERMINAL V5 ELITE FINAL
+# Scanner + Busca Individual + Gráfico + Ranking
+# Código completo pronto para colar
 # =====================================================
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import time
 
-st.set_page_config(page_title="PRO DESK EDGE FINAL", layout="wide")
+# =====================================================
+# CONFIG
+# =====================================================
+
+st.set_page_config(
+    page_title="BUY SIDE TERMINAL V5 ELITE FINAL",
+    page_icon="🏹",
+    layout="wide"
+)
 
 SENHA = "LUCRO5"
+
+# =====================================================
+# CSS
+# =====================================================
+
+st.markdown("""
+<style>
+.main {background:#0e1117;}
+.stTextInput input {
+    background:#161b22 !important;
+    color:white !important;
+}
+.stButton button {
+    width:100%;
+    border-radius:10px;
+    height:44px;
+}
+.stMetric {
+    background:#161b22;
+    padding:14px;
+    border-radius:10px;
+    border:1px solid #30363d;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =====================================================
 # LOGIN
@@ -20,14 +56,17 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🏦 PRO DESK - EDGE FINAL")
+    st.title("🏹 BUY SIDE TERMINAL V5 ELITE FINAL")
+    st.subheader("Área Restrita")
 
-    senha = st.text_input("Senha:", type="password")
+    senha = st.text_input("Digite a senha:", type="password")
 
-    if st.button("ENTRAR"):
+    if st.button("🔐 ENTRAR"):
         if senha == SENHA:
             st.session_state.logado = True
             st.rerun()
+        else:
+            st.error("Senha incorreta.")
 
     st.stop()
 
@@ -59,64 +98,71 @@ ATIVOS = [
 "C2OL34"
 ]
 
+ATIVOS = list(dict.fromkeys(ATIVOS))
+
 # =====================================================
-# SAFE
+# FUNÇÕES
 # =====================================================
 
 def safe(x):
     x = np.array(x, dtype=float).reshape(-1)
     x = x[~np.isnan(x)]
-    return x if len(x) > 10 else None
+    return x if len(x) > 30 else None
 
-# =====================================================
-# EMA
-# =====================================================
+@st.cache_data(ttl=900)
+def baixar_dados(ticker):
 
-def ema(s, n):
-    s = safe(s)
-    if s is None:
-        return np.zeros(10)
-    return pd.Series(s).ewm(span=n, adjust=False).mean().values
+    try:
+        df = yf.download(
+            ticker + ".SA",
+            period="320d",
+            interval="1d",
+            auto_adjust=True,
+            progress=False
+        )
 
-# =====================================================
-# REGIME
-# =====================================================
+        if df.empty:
+            return None
 
-def regime(close):
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
-    close = safe(close)
-    if close is None:
-        return "NEUTRO"
+        cols = ["Open","High","Low","Close","Volume"]
+        df = df[cols].copy()
 
-    ret = np.diff(close[-20:]) / close[-20:-1]
+        for c in cols:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    vol = np.std(ret)
-    trend = np.mean(ret)
+        df = df.ffill().dropna()
 
-    if vol > 0.02:
-        return "VOLATIL"
-    if trend > 0.001:
-        return "TENDENCIA"
-    return "LATERAL"
+        if len(df) < 80:
+            return None
 
-# =====================================================
-# SETUP SCORE (0-100)
-# =====================================================
+        return df
 
-def setup_score(preco, ema21, ema72, close):
+    except:
+        return None
+
+def ema(series, n):
+    return pd.Series(series).ewm(span=n, adjust=False).mean().values
+
+def setup_score(preco, e21, e72, close):
 
     score = 0
 
-    if preco > ema21:
+    if preco > e21:
         score += 35
-    if ema21 > ema72:
+
+    if e21 > e72:
         score += 35
 
     ret5 = (preco / close[-6]) - 1
+
     if ret5 > 0:
         score += min(ret5 * 80, 20)
 
-    dist = (preco / ema21) - 1
+    dist = (preco / e21) - 1
+
     if dist > 0.08:
         score -= 20
     elif dist > 0.05:
@@ -124,138 +170,194 @@ def setup_score(preco, ema21, ema72, close):
 
     return max(0, min(score, 100))
 
-# =====================================================
-# PROBABILIDADE (ESTÁVEL)
-# =====================================================
+def probabilidade(score):
+    return (1 / (1 + np.exp(-0.08 * (score - 50)))) * 100
 
-def probabilidade(setup):
+def setup_label(score):
 
-    return (1 / (1 + np.exp(-0.08 * (setup - 50)))) * 100
+    if score < 40:
+        return "🔴 FRACO"
+    elif score < 60:
+        return "🟡 NEUTRO"
+    elif score < 80:
+        return "🟢 FORTE"
+    else:
+        return "🏆 ELITE"
 
-# =====================================================
-# EDGE BRUTO
-# =====================================================
+def gain_stop(preco):
+    gain = preco * 1.06
+    stop = preco * 0.96
+    return round(gain,2), round(stop,2)
 
-def edge_raw(setup, prob):
+def analisar_ativo(ticker):
 
-    return setup * prob
+    df = baixar_dados(ticker)
 
-# =====================================================
-# LABEL SETUP
-# =====================================================
-
-def setup_label(s):
-
-    if s < 40:
-        return "FRACO"
-    elif s < 60:
-        return "NEUTRO"
-    elif s < 80:
-        return "FORTE"
-    return "INSTITUCIONAL"
-
-# =====================================================
-# TARGET FIXO
-# =====================================================
-
-def targets(preco):
-    return round(preco * 1.06, 2), round(preco * 0.96, 2)
-
-# =====================================================
-# ANALISAR
-# =====================================================
-
-def analisar(t):
-
-    df = yf.download(t + ".SA",
-                     period="300d",
-                     interval="1d",
-                     auto_adjust=True,
-                     progress=False)
-
-    if df is None or df.empty:
+    if df is None:
         return None
 
     close = safe(df["Close"])
+
     if close is None:
         return None
 
     preco = close[-1]
 
-    ema21 = ema(close, 21)
-    ema72 = ema(close, 72)
+    e21 = ema(close, 21)
+    e72 = ema(close, 72)
 
-    setup = setup_score(preco, ema21[-1], ema72[-1], close)
+    score = setup_score(preco, e21[-1], e72[-1], close)
 
-    prob = probabilidade(setup)
+    prob = probabilidade(score)
 
-    edge = edge_raw(setup, prob)
-
-    gain, stop = targets(preco)
+    gain, stop = gain_stop(preco)
 
     return {
-        "Ativo": t,
+        "Ativo": ticker,
         "Preço": round(preco,2),
-        "Setup": setup_label(setup),
-        "SetupScore": setup,
+        "SetupScore": score,
+        "Setup": setup_label(score),
         "Prob": round(prob,2),
-        "Edge_raw": edge,
         "Gain": gain,
-        "Stop": stop
+        "Stop": stop,
+        "df": df,
+        "EMA21": e21,
+        "EMA72": e72
     }
 
 # =====================================================
-# SCANNER
+# SIDEBAR
 # =====================================================
 
-st.title("🏦 PRO DESK - EDGE PERCENTIL FINAL")
+with st.sidebar:
 
-if st.button("ESCANEAR MERCADO"):
+    st.title("🏹 MENU")
 
-    resultados = []
-
-    for t in ATIVOS:
-
-        r = analisar(t)
-        if r:
-            resultados.append(r)
-
-    df = pd.DataFrame(resultados)
-
-    if df.empty:
-        st.warning("Sem dados disponíveis")
-        st.stop()
-
-    # =====================================================
-    # EDGE PERCENTIL (CORREÇÃO PRINCIPAL)
-    # =====================================================
-
-    df["Edge"] = df["Edge_raw"].rank(pct=True) * 100
-
-    # =====================================================
-    # SCORE FINAL (RANKING REAL)
-    # =====================================================
-
-    df["ScoreFinal"] = df["Edge"] * 0.7 + df["Prob"] * 0.3
-
-    df = df.sort_values("ScoreFinal", ascending=False)
-
-    df.index = range(1, len(df) + 1)
-    df.insert(0, "Rank", df.index)
-
-    st.subheader("📊 TODOS OS ATIVOS (EDGE NORMALIZADO)")
-
-    st.dataframe(
-        df[[
-            "Rank",
-            "Ativo",
-            "Setup",
-            "Preço",
-            "Prob",
-            "Edge",
-            "ScoreFinal",
-            "Gain",
-            "Stop"
-        ]],
-        use_container_width=True
+    modo = st.radio(
+        "Escolha:",
+        ["Scanner Mercado", "Ativo Específico"]
     )
+
+# =====================================================
+# SCANNER MERCADO
+# =====================================================
+
+if modo == "Scanner Mercado":
+
+    st.title("🏹 Scanner Mercado V5 Elite")
+
+    if st.button("🚀 ESCANEAR MERCADO"):
+
+        resultados = []
+
+        barra = st.progress(0)
+
+        total = len(ATIVOS)
+
+        for i, ativo in enumerate(ATIVOS):
+
+            r = analisar_ativo(ativo)
+
+            if r:
+                resultados.append(r)
+
+            barra.progress((i+1)/total)
+
+        if len(resultados) == 0:
+            st.warning("Nenhum resultado encontrado.")
+
+        else:
+
+            tabela = pd.DataFrame(resultados)
+
+            # EDGE PERCENTIL
+            tabela["Edge"] = tabela["SetupScore"].rank(pct=True) * 100
+
+            # SCORE FINAL
+            tabela["ScoreFinal"] = (
+                tabela["Edge"] * 0.7 +
+                tabela["Prob"] * 0.3
+            )
+
+            tabela = tabela.sort_values(
+                "ScoreFinal",
+                ascending=False
+            ).reset_index(drop=True)
+
+            tabela.index += 1
+            tabela.insert(0, "Rank", tabela.index)
+
+            st.success(f"{len(tabela)} ativos analisados.")
+
+            st.dataframe(
+                tabela[
+                    [
+                        "Rank",
+                        "Ativo",
+                        "Setup",
+                        "Preço",
+                        "Prob",
+                        "Edge",
+                        "ScoreFinal",
+                        "Gain",
+                        "Stop"
+                    ]
+                ],
+                use_container_width=True
+            )
+
+# =====================================================
+# ATIVO ESPECÍFICO
+# =====================================================
+
+else:
+
+    st.title("🏹 Análise Individual")
+
+    ticker = st.text_input(
+        "Digite o ticker:",
+        "PETR4"
+    ).upper().replace(".SA","")
+
+    if st.button("🔎 ANALISAR"):
+
+        r = analisar_ativo(ticker)
+
+        if r is None:
+            st.error("Ativo inválido ou sem dados.")
+
+        else:
+
+            c1,c2,c3,c4 = st.columns(4)
+
+            c1.metric("Preço", f"R$ {r['Preço']}")
+            c2.metric("Probabilidade", f"{r['Prob']}%")
+            c3.metric("Gain", f"R$ {r['Gain']}")
+            c4.metric("Stop", f"R$ {r['Stop']}")
+
+            st.subheader(r["Setup"])
+
+            # semáforo
+            if r["Prob"] >= 75:
+                st.success("🟢 Comprar / Forte")
+            elif r["Prob"] >= 60:
+                st.warning("🟡 Observar")
+            else:
+                st.error("🔴 Evitar")
+
+            graf = pd.DataFrame({
+                "Preço": r["df"]["Close"],
+                "EMA21": r["EMA21"],
+                "EMA72": r["EMA72"]
+            }, index=r["df"].index)
+
+            st.line_chart(graf, use_container_width=True)
+
+# =====================================================
+# RODAPÉ
+# =====================================================
+
+st.markdown("---")
+st.caption(
+    f"BUY SIDE TERMINAL V5 ELITE FINAL | {time.strftime('%d/%m/%Y %H:%M:%S')}"
+)
